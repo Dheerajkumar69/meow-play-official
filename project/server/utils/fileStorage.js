@@ -8,7 +8,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Paths
-const SONGS_DIR = 'F:\\spotify\\New folder\\meow-play-official\\songs';
+const SONGS_DIR = path.join(__dirname, '../../../songs');
 const SONGS_JSON_PATH = path.join(SONGS_DIR, 'songs.json');
 
 /**
