@@ -75,6 +75,17 @@ export const songsAPI = {
     return response.data;
   },
   
+  checkDuplicate: async (audioFile: File) => {
+    const formData = new FormData();
+    formData.append('audio', audioFile);
+    const response = await api.post('/songs/check-duplicate', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  },
+  
   // Get all songs
   getAllSongs: async () => {
     const response = await api.get('/songs');
@@ -112,8 +123,13 @@ export const songsAPI = {
   },
   
   // Get stream URL for a song
-  getStreamUrl: (id: string) => {
-    return `${API_URL}/stream/${id}`;
+  getStreamUrl: (song: any) => {
+    // If we have a filename, use that for streaming
+    if (song.filename) {
+      return `${API_URL}/stream/${song.filename}`;
+    }
+    // Fallback to ID-based streaming for backward compatibility
+    return `${API_URL}/stream/id/${song.id}`;
   }
 };
 

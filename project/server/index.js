@@ -1,6 +1,5 @@
 import express from 'express';
 import cors from 'cors';
-import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import multer from 'multer';
 import path from 'path';
@@ -73,10 +72,19 @@ const upload = multer({
   }
 });
 
-// Connect to MongoDB
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/meow-play')
-  .then(() => console.log('Connected to MongoDB'))
-  .catch(err => console.error('MongoDB connection error:', err));
+// Create songs directory if it doesn't exist
+const songsDir = path.join(__dirname, './songs');
+if (!fs.existsSync(songsDir)) {
+  fs.mkdirSync(songsDir, { recursive: true });
+  console.log(`Created songs directory: ${songsDir}`);
+}
+
+// Initialize songs.json if it doesn't exist
+const songsJsonPath = path.join(songsDir, 'songs.json');
+if (!fs.existsSync(songsJsonPath)) {
+  fs.writeFileSync(songsJsonPath, '[]', 'utf8');
+  console.log(`Created songs.json file: ${songsJsonPath}`);
+}
 
 // Import routes
 import songRoutes from './routes/songs.js';

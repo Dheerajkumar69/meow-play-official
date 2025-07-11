@@ -56,7 +56,7 @@ const ServerSongs: React.FC = () => {
   const handlePlaySong = async (song: ServerSong) => {
     try {
       // Get the streaming URL for the song
-      const streamUrl = songsAPI.getStreamUrl(song._id);
+      const streamUrl = songsAPI.getStreamUrl(song);
       
       // Create a local song object for the player
       const localSong = {
@@ -102,7 +102,7 @@ const ServerSongs: React.FC = () => {
 
   const handleDownloadSong = async (song: ServerSong) => {
     try {
-      const streamUrl = songsAPI.getStreamUrl(song._id);
+      const streamUrl = songsAPI.getStreamUrl(song);
       
       // Create an anchor element and trigger download
       const a = document.createElement('a');
@@ -265,7 +265,7 @@ const ServerSongs: React.FC = () => {
                         </button>
                         {user && song.uploadedBy === user.id && (
                           <button
-                            onClick={() => handleDeleteSong(song._id)}
+                            onClick={() => handleDeleteSong(song)}
                             className="p-2 text-red-400 hover:text-red-300 transition-colors"
                             title="Delete"
                           >

@@ -3,7 +3,8 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import Song from '../models/Song.js';
+import crypto from 'crypto';
+import fileStorage from '../utils/fileStorage.js';
 import auth from '../middleware/auth.js';
 
 const router = express.Router();
@@ -61,28 +62,47 @@ router.post('/songs/upload', auth, upload.fields([
 
     const audioFile = req.files.audio[0];
     const posterFile = req.files.poster ? req.files.poster[0] : null;
-
-    // Create song document
-    const song = new Song({
+    
+    // Generate a unique filename for the song
+    const originalExt = path.extname(audioFile.originalname);
+    const filename = `${Date.now()}-${Math.round(Math.random() * 1E9)}${originalExt}`;
+    const songPath = path.join(fileStorage.SONGS_DIR, filename);
+    
+    // Move the file from uploads to songs directory
+    fs.copyFileSync(audioFile.path, songPath);
+    fs.unlinkSync(audioFile.path); // Remove the original file
+    
+    // Generate hash for duplicate detection
+    const hash = await fileStorage.generateFileHash(songPath);
+    
+    // Check for duplicates by hash
+    if (fileStorage.isDuplicateHash(hash)) {
+      // Remove the file we just copied
+      fs.unlinkSync(songPath);
+      return res.status(400).json({ message: 'Duplicate song detected. Upload aborted.' });
+    }
+    
+    // Create song metadata
+    const song = {
       title: req.body.title || audioFile.originalname.replace(/\.[^/.]+$/, ''),
       artist: req.body.artist || 'Unknown Artist',
-      album: req.body.album,
-      genre: req.body.genre,
-      duration: req.body.duration || 0, // This should be extracted from the file
-      filePath: `/uploads/audio/${audioFile.filename}`,
+      album: req.body.album || '',
+      genre: req.body.genre || '',
+      duration: req.body.duration || 0,
+      filename: filename,
+      hash: hash,
+      posterFilename: posterFile ? posterFile.filename : null,
       posterPath: posterFile ? `/uploads/posters/${posterFile.filename}` : '/assets/default-cover.svg',
       uploadedBy: req.user.id,
-      year: req.body.year,
+      year: req.body.year || new Date().getFullYear(),
       mood: req.body.mood ? req.body.mood.split(',') : [],
-      tempo: req.body.tempo,
-      key: req.body.key,
-      description: req.body.description,
-      license: req.body.license,
-      source: req.body.source
-    });
+      playCount: 0,
+      uploadedAt: new Date().toISOString()
+    };
 
-    await song.save();
-    res.status(201).json(song);
+    // Add song to the JSON file
+    const savedSong = fileStorage.addSong(song);
+    res.status(201).json(savedSong);
   } catch (error) {
     console.error('Upload error:', error);
     res.status(500).json({ message: error.message });
@@ -90,9 +110,9 @@ router.post('/songs/upload', auth, upload.fields([
 });
 
 // Get all songs
-router.get('/songs', async (req, res) => {
+router.get('/songs', (req, res) => {
   try {
-    const songs = await Song.find().sort({ createdAt: -1 });
+    const songs = fileStorage.getAllSongs();
     res.json(songs);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -100,9 +120,9 @@ router.get('/songs', async (req, res) => {
 });
 
 // Get a specific song
-router.get('/songs/:id', async (req, res) => {
+router.get('/songs/:id', (req, res) => {
   try {
-    const song = await Song.findById(req.params.id);
+    const song = fileStorage.getSongById(req.params.id);
     if (!song) {
       return res.status(404).json({ message: 'Song not found' });
     }
@@ -112,20 +132,72 @@ router.get('/songs/:id', async (req, res) => {
   }
 });
 
-// Stream a song
-router.get('/stream/:id', async (req, res) => {
+// Stream a song by filename
+router.get('/stream/:filename', (req, res) => {
   try {
-    const song = await Song.findById(req.params.id);
+    const filename = req.params.filename;
+    const filePath = path.join(fileStorage.SONGS_DIR, filename);
+    
+    // Check if file exists
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ message: 'Audio file not found' });
+    }
+
+    // Get the song metadata and increment play count
+    const song = fileStorage.getSongByFilename(filename);
+    if (song) {
+      fileStorage.incrementPlayCount(song.id);
+    }
+
+    // Get file stats
+    const stat = fs.statSync(filePath);
+    const fileSize = stat.size;
+    const range = req.headers.range;
+
+    // Handle range requests for streaming
+    if (range) {
+      const parts = range.replace(/bytes=/, '').split('-');
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      const chunksize = (end - start) + 1;
+      const file = fs.createReadStream(filePath, { start, end });
+      
+      res.writeHead(206, {
+        'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+        'Accept-Ranges': 'bytes',
+        'Content-Length': chunksize,
+        'Content-Type': 'audio/mpeg'
+      });
+      
+      file.pipe(res);
+    } else {
+      // No range requested, send entire file
+      res.writeHead(200, {
+        'Content-Length': fileSize,
+        'Content-Type': 'audio/mpeg'
+      });
+      
+      fs.createReadStream(filePath).pipe(res);
+    }
+  } catch (error) {
+    console.error('Streaming error:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Stream a song by ID (for backward compatibility)
+router.get('/stream/id/:id', (req, res) => {
+  try {
+    const song = fileStorage.getSongById(req.params.id);
     if (!song) {
       return res.status(404).json({ message: 'Song not found' });
     }
 
     // Increment play count
-    song.playCount += 1;
-    await song.save();
+    fileStorage.incrementPlayCount(song.id);
 
     // Get the absolute file path
-    const filePath = path.join(__dirname, '../..', song.filePath);
+    const filePath = path.join(fileStorage.SONGS_DIR, song.filename);
     
     // Check if file exists
     if (!fs.existsSync(filePath)) {
@@ -169,9 +241,9 @@ router.get('/stream/:id', async (req, res) => {
 });
 
 // Get songs by user
-router.get('/songs/user/:userId', async (req, res) => {
+router.get('/songs/user/:userId', (req, res) => {
   try {
-    const songs = await Song.find({ uploadedBy: req.params.userId }).sort({ createdAt: -1 });
+    const songs = fileStorage.getAllSongs().filter(song => song.uploadedBy === req.params.userId);
     res.json(songs);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -179,12 +251,17 @@ router.get('/songs/user/:userId', async (req, res) => {
 });
 
 // Search songs
-router.get('/songs/search/:query', async (req, res) => {
+router.get('/songs/search/:query', (req, res) => {
   try {
-    const songs = await Song.find(
-      { $text: { $search: req.params.query } },
-      { score: { $meta: 'textScore' } }
-    ).sort({ score: { $meta: 'textScore' } });
+    const query = req.params.query.toLowerCase();
+    const songs = fileStorage.getAllSongs().filter(song => {
+      return (
+        song.title.toLowerCase().includes(query) ||
+        song.artist.toLowerCase().includes(query) ||
+        (song.album && song.album.toLowerCase().includes(query)) ||
+        (song.genre && song.genre.toLowerCase().includes(query))
+      );
+    });
     
     res.json(songs);
   } catch (error) {
@@ -193,64 +270,81 @@ router.get('/songs/search/:query', async (req, res) => {
 });
 
 // Update a song
-router.patch('/songs/:id', auth, async (req, res) => {
+router.patch('/songs/:id', auth, (req, res) => {
   try {
-    const song = await Song.findById(req.params.id);
+    const song = fileStorage.getSongById(req.params.id);
     
     if (!song) {
       return res.status(404).json({ message: 'Song not found' });
     }
     
     // Check if user is the uploader or an admin
-    if (song.uploadedBy.toString() !== req.user.id && !req.user.isAdmin) {
+    if (song.uploadedBy !== req.user.id && !req.user.isAdmin) {
       return res.status(403).json({ message: 'Not authorized to update this song' });
     }
     
     // Update fields
     const updates = req.body;
-    Object.keys(updates).forEach(key => {
-      if (key !== 'filePath' && key !== 'uploadedBy' && key !== 'createdAt') {
-        song[key] = updates[key];
-      }
-    });
+    const nonUpdatableFields = ['filename', 'hash', 'uploadedBy', 'uploadedAt'];
     
-    await song.save();
-    res.json(song);
+    // Filter out non-updatable fields
+    const filteredUpdates = Object.fromEntries(
+      Object.entries(updates).filter(([key]) => !nonUpdatableFields.includes(key))
+    );
+    
+    const updatedSong = fileStorage.updateSong(req.params.id, filteredUpdates);
+    res.json(updatedSong);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 });
 
 // Delete a song
-router.delete('/songs/:id', auth, async (req, res) => {
+router.delete('/songs/:id', auth, (req, res) => {
   try {
-    const song = await Song.findById(req.params.id);
+    const song = fileStorage.getSongById(req.params.id);
     
     if (!song) {
       return res.status(404).json({ message: 'Song not found' });
     }
     
     // Check if user is the uploader or an admin
-    if (song.uploadedBy.toString() !== req.user.id && !req.user.isAdmin) {
+    if (song.uploadedBy !== req.user.id && !req.user.isAdmin) {
       return res.status(403).json({ message: 'Not authorized to delete this song' });
     }
     
-    // Delete associated files
-    const audioPath = path.join(__dirname, '../..', song.filePath);
-    if (fs.existsSync(audioPath)) {
-      fs.unlinkSync(audioPath);
-    }
+    // Delete the song (the fileStorage.deleteSong function handles file deletion)
+    const deleted = fileStorage.deleteSong(req.params.id);
     
-    if (song.posterPath && song.posterPath !== '/assets/default-cover.svg') {
-      const posterPath = path.join(__dirname, '../..', song.posterPath);
-      if (fs.existsSync(posterPath)) {
-        fs.unlinkSync(posterPath);
-      }
+    if (deleted) {
+      res.json({ message: 'Song deleted successfully' });
+    } else {
+      res.status(500).json({ message: 'Failed to delete song' });
     }
-    
-    await Song.findByIdAndDelete(req.params.id);
-    res.json({ message: 'Song deleted successfully' });
   } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Check if a song is a duplicate
+router.post('/songs/check-duplicate', auth, upload.single('audio'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: 'Audio file is required' });
+    }
+
+    // Generate hash for the uploaded file
+    const hash = await fileStorage.generateFileHash(req.file.path);
+    
+    // Check if a song with this hash already exists
+    const isDuplicate = fileStorage.isDuplicateHash(hash);
+    
+    // Clean up the temporary file
+    fs.unlinkSync(req.file.path);
+    
+    res.json({ isDuplicate, hash });
+  } catch (error) {
+    console.error('Duplicate check error:', error);
     res.status(500).json({ message: error.message });
   }
 });
