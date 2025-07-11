@@ -111,25 +111,7 @@ const musicReducer = (state: typeof initialState, action: MusicAction): typeof i
       const existingIds = new Set(state.songs.map(s => s.id));
       const newSongs = action.payload.filter(s => !existingIds.has(s.id));
       return { ...state, songs: [...state.songs, ...newSongs] };
-    case 'REFRESH_SONGS':
-      // Merge local songs with shared songs from community database
-      const sharedSongs = sharedDatabase.getSharedSongs();
-      const localSongs = state.songs.filter(s => s.uploadedBy !== 'community');
-      const communityIds = new Set(localSongs.map(s => s.id));
-      const newCommunity = sharedSongs.filter(s => !communityIds.has(s.id));
-      
-      // Ensure all songs have a coverArt property
-      const processedLocalSongs = localSongs.map(song => ({
-        ...song,
-        coverArt: song.coverArt || '/assets/default-cover.svg'
-      }));
-      
-      const processedCommunity = newCommunity.map(song => ({
-        ...song,
-        coverArt: song.coverArt || '/assets/default-cover.svg'
-      }));
-      
-      return { ...state, songs: [...processedLocalSongs, ...processedCommunity] };
+
     case 'SET_LOADING':
       return { ...state, loading: action.payload };
     case 'SET_ERROR':
@@ -393,10 +375,6 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const setSongs = useCallback((songs: Song[]) => {
     dispatch({ type: 'SET_SONGS', payload: songs });
-  }, []);
-
-  const refreshSongs = useCallback(() => {
-    dispatch({ type: 'REFRESH_SONGS' });
   }, []);
 
   const setEqualizer = useCallback((equalizer: PlaybackState['equalizer']) => {
