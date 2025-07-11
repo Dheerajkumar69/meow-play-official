@@ -11,6 +11,66 @@ const __dirname = path.dirname(__filename);
 const SONGS_DIR = path.join(__dirname, '../../../songs');
 const SONGS_JSON_PATH = path.join(SONGS_DIR, 'songs.json');
 
+// Initialize file watcher
+const chokidar = require('chokidar');
+const watcher = chokidar.watch(SONGS_DIR, {
+  ignored: /(^|[\\\/])\\./, // ignore dotfiles
+  persistent: true
+});
+
+// Add event listeners
+watcher
+  .on('add', path => {
+    const song = getSongByFilename(path.split('/').pop());
+    if (!song) {
+      // New file added - add to metadata
+      const hash = generateFileHash(path);
+      addSong({
+        id: crypto.randomUUID(),
+        filename: path.split('/').pop(),
+        filepath: path,
+        hash,
+        createdAt: new Date().toISOString(),
+        playCount: 0
+      });
+    }
+  })
+  .on('unlink', path => {
+    // File deleted - remove from metadata
+    const filename = path.split('/').pop();
+    const song = getSongByFilename(filename);
+    if (song) {
+      deleteSong(song.id);
+    }
+  });
+});
+
+// Add event listeners
+watcher
+  .on('add', path => {
+    const song = getSongByFilename(path.split('/').pop());
+    if (!song) {
+      // New file added - add to metadata
+      const hash = generateFileHash(path);
+      addSong({
+        id: crypto.randomUUID(),
+        filename: path.split('/').pop(),
+        filepath: path,
+        hash,
+        createdAt: new Date().toISOString(),
+        playCount: 0
+      });
+    }
+  })
+  .on('unlink', path => {
+    // File deleted - remove from metadata
+    const filename = path.split('/').pop();
+    const song = getSongByFilename(filename);
+    if (song) {
+      deleteSong(song.id);
+    }
+  });
+
 /**
  * Generate a hash for a file to check for duplicates
  * @param {string} filePath - Path to the file
