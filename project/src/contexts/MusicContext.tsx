@@ -117,7 +117,19 @@ const musicReducer = (state: typeof initialState, action: MusicAction): typeof i
       const localSongs = state.songs.filter(s => s.uploadedBy !== 'community');
       const communityIds = new Set(localSongs.map(s => s.id));
       const newCommunity = sharedSongs.filter(s => !communityIds.has(s.id));
-      return { ...state, songs: [...localSongs, ...newCommunity] };
+      
+      // Ensure all songs have a coverArt property
+      const processedLocalSongs = localSongs.map(song => ({
+        ...song,
+        coverArt: song.coverArt || '/assets/default-cover.svg'
+      }));
+      
+      const processedCommunity = newCommunity.map(song => ({
+        ...song,
+        coverArt: song.coverArt || '/assets/default-cover.svg'
+      }));
+      
+      return { ...state, songs: [...processedLocalSongs, ...processedCommunity] };
     case 'SET_LOADING':
       return { ...state, loading: action.payload };
     case 'SET_ERROR':
@@ -383,6 +395,10 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     dispatch({ type: 'SET_SONGS', payload: songs });
   }, []);
 
+  const refreshSongs = useCallback(() => {
+    dispatch({ type: 'REFRESH_SONGS' });
+  }, []);
+
   const setEqualizer = useCallback((equalizer: PlaybackState['equalizer']) => {
     dispatch({ type: 'SET_EQUALIZER', payload: equalizer });
   }, []);
@@ -434,7 +450,10 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       toggleRepeat,
       updateCurrentTime,
       updateDuration,
+      songs: state.songs,
       setSongs,
+      loading: state.loading,
+      error: state.error,
       setEqualizer,
       setCrossfade,
       refreshSongs

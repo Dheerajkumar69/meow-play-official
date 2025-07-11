@@ -31,7 +31,8 @@ class SharedDatabaseManager {
     file: File, 
     userId: string, 
     username: string,
-    customMetadata?: Partial<Song>
+    customMetadata?: Partial<Song>,
+    posterFile?: File
   ): Promise<SharedSong> {
     try {
       // Extract metadata automatically
@@ -39,6 +40,12 @@ class SharedDatabaseManager {
       
       // Convert file to base64 for storage (in production, use proper file storage)
       const audioBase64 = await this.fileToBase64(file);
+      
+      // Process poster file if provided
+      let posterBase64 = null;
+      if (posterFile) {
+        posterBase64 = await audioMetadataExtractor.processPosterImage(posterFile);
+      }
       
       // Create shared song object
       const sharedSong: SharedSong = {
@@ -49,7 +56,7 @@ class SharedDatabaseManager {
         genre: customMetadata?.genre || metadata.genre,
         duration: metadata.duration || 180,
         filePath: audioBase64,
-        coverArt: metadata.coverArt || customMetadata?.coverArt,
+        coverArt: posterBase64 || metadata.coverArt || customMetadata?.coverArt || '/assets/default-cover.svg',
         uploadedBy: userId,
         uploaderUsername: username,
         isShared: true,
@@ -177,6 +184,39 @@ class SharedDatabaseManager {
     } catch (error) {
       console.error('Failed to delete song:', error);
       throw new Error('Failed to delete song');
+    }
+  }
+  
+  // Bulk delete songs (admin only)
+  async bulkDeleteSongs(songIds: string[], adminUserId: string): Promise<{success: number, failed: number}> {
+    try {
+      const songs = this.getAllSharedSongs();
+      let successCount = 0;
+      let failedCount = 0;
+      
+      // Process each song ID
+      for (const songId of songIds) {
+        const songIndex = songs.findIndex(song => song.id === songId);
+        
+        if (songIndex !== -1) {
+          // Mark as removed instead of deleting completely
+          songs[songIndex].status = 'removed';
+          successCount++;
+          console.log(`Song "${songs[songIndex].title}" removed by admin ${adminUserId}`);
+        } else {
+          failedCount++;
+        }
+      }
+      
+      // Save all changes at once
+      if (successCount > 0) {
+        await this.saveAllSharedSongs(songs);
+      }
+      
+      return { success: successCount, failed: failedCount };
+    } catch (error) {
+      console.error('Failed to bulk delete songs:', error);
+      throw new Error('Failed to bulk delete songs');
     }
   }
 

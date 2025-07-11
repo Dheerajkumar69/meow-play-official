@@ -5,6 +5,7 @@ import { MusicProvider } from './contexts/MusicContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
+import AppInitializer from './components/AppInitializer';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Home from './pages/Home';
@@ -25,8 +26,9 @@ function App() {
     <ErrorBoundary>
       <AuthProvider>
         <MusicProvider>
-          <Router>
-            <Routes>
+          <AppInitializer>
+            <Router>
+              <Routes>
               <Route path="/" element={<Layout />}>
                 <Route path="login" element={<Login />} />
                 <Route path="register" element={<Register />} />
@@ -121,8 +123,9 @@ function App() {
                 <Route path="404" element={<NotFound />} />
                 <Route path="*" element={<Navigate to="/404" replace />} />
               </Route>
-            </Routes>
-          </Router>
+              </Routes>
+            </Router>
+          </AppInitializer>
         </MusicProvider>
       </AuthProvider>
     </ErrorBoundary>

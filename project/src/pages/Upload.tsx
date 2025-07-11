@@ -17,6 +17,8 @@ interface FileWithMetadata {
   metadata: AudioMetadata;
   id: string;
   shareToDatabase: boolean;
+  posterFile?: File;
+  posterPreview?: string;
 }
 
 const Upload: React.FC = () => {
@@ -133,6 +135,30 @@ const Upload: React.FC = () => {
     ));
   }, []);
 
+  const handlePosterUpload = useCallback(async (fileId: string, posterFile: File) => {
+    try {
+      // Process the poster image
+      const posterPreview = await audioMetadataExtractor.processPosterImage(posterFile);
+      
+      // Update the file metadata with the poster
+      setSelectedFiles(prev => prev.map(item => 
+        item.id === fileId 
+          ? { 
+              ...item, 
+              posterFile, 
+              posterPreview,
+              metadata: { 
+                ...item.metadata, 
+                coverArt: posterPreview 
+              } 
+            }
+          : item
+      ));
+    } catch (error) {
+      console.error('Failed to process poster image:', error);
+    }
+  }, []);
+
   const toggleShareToDatabase = useCallback((fileId: string) => {
     setSelectedFiles(prev => prev.map(item => 
       item.id === fileId 
@@ -189,7 +215,7 @@ const Upload: React.FC = () => {
       const newSongs = [];
       const sharedSongs = [];
 
-      for (const { file, metadata, shareToDatabase } of selectedFiles) {
+      for (const { file, metadata, shareToDatabase, posterFile } of selectedFiles) {
         // Create local song with blob URL for immediate playback
         const localBlobUrl = URL.createObjectURL(file);
         
@@ -201,7 +227,7 @@ const Upload: React.FC = () => {
           genre: metadata.genre,
           duration: metadata.duration || 180,
           filePath: localBlobUrl,
-          coverArt: metadata.coverArt,
+          coverArt: metadata.coverArt || '/assets/default-cover.svg',
           uploadedBy: user?.id || '1',
           createdAt: new Date(),
           playCount: 0,
@@ -222,9 +248,10 @@ const Upload: React.FC = () => {
                 artist: metadata.artist,
                 album: metadata.album,
                 genre: metadata.genre,
-                coverArt: metadata.coverArt,
+                coverArt: metadata.coverArt || '/assets/default-cover.svg',
                 year: metadata.year
-              }
+              },
+              posterFile // Pass the poster file to the upload function
             );
             sharedSongs.push(sharedSong);
           } catch (error) {
@@ -502,6 +529,51 @@ const Upload: React.FC = () => {
                         <option value="Reggae" className="bg-gray-800 text-white">Reggae</option>
                         <option value="Other" className="bg-gray-800 text-white">Other</option>
                       </select>
+                    </div>
+                    
+                    {/* Poster Image Upload */}
+                    <div className="col-span-1 md:col-span-2">
+                      <label className="block text-sm font-medium text-gray-300 mb-2">
+                        Cover Image (Optional)
+                      </label>
+                      <div className="flex items-start space-x-4">
+                        <div className="w-24 h-24 bg-white/10 border border-white/20 rounded-lg overflow-hidden flex items-center justify-center">
+                          {fileItem.posterPreview ? (
+                            <img 
+                              src={fileItem.posterPreview} 
+                              alt="Cover preview" 
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-full h-full bg-gradient-to-br from-purple-500/50 to-pink-500/50 flex items-center justify-center">
+                              <Music className="w-8 h-8 text-white/70" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex-1">
+                          <input
+                            type="file"
+                            accept="image/*,.jpg,.jpeg,.png,.gif,.webp"
+                            onChange={(e) => {
+                              if (e.target.files && e.target.files[0]) {
+                                handlePosterUpload(fileItem.id, e.target.files[0]);
+                              }
+                            }}
+                            className="hidden"
+                            id={`poster-upload-${fileItem.id}`}
+                          />
+                          <label 
+                            htmlFor={`poster-upload-${fileItem.id}`}
+                            className="inline-flex items-center px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/20 rounded-lg text-white text-sm font-medium cursor-pointer transition-colors"
+                          >
+                            <Upload className="w-4 h-4 mr-2" />
+                            {fileItem.posterFile ? 'Change Cover Image' : 'Upload Cover Image'}
+                          </label>
+                          <p className="text-gray-400 text-xs mt-2">
+                            Upload a custom cover image for your song. Recommended size: 500x500px.
+                          </p>
+                        </div>
+                      </div>
                     </div>
                   </div>
 

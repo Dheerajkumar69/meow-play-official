@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Shield, Users, Trash2, Eye, EyeOff, Database, Music, AlertTriangle } from 'lucide-react';
+import { Shield, Users, Trash2, Eye, EyeOff, Database, Music, AlertTriangle, CheckSquare, Square, XCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { offlineAuth, MASTER_ADMIN } from '../utils/offlineAuth';
 import { sharedDatabase, SharedSong } from '../utils/sharedDatabase';
@@ -22,6 +22,22 @@ const AdminPanel: React.FC = () => {
       return [];
     }
   });
+  const [selectedSongs, setSelectedSongs] = useState<string[]>([]);
+  const [selectAll, setSelectAll] = useState(false);
+  
+  // Update selectAll state when selectedSongs changes
+  React.useEffect(() => {
+    const activeSongIds = sharedSongs
+      .filter(song => song.status === 'active')
+      .map(song => song.id);
+    
+    // Check if all active songs are selected
+    const allActiveSelected = 
+      activeSongIds.length > 0 && 
+      activeSongIds.every(id => selectedSongs.includes(id));
+    
+    setSelectAll(allActiveSelected);
+  }, [selectedSongs, sharedSongs]);
 
   if (!user?.isAdmin) {
     return (
@@ -71,8 +87,59 @@ const AdminPanel: React.FC = () => {
   const refreshSharedSongs = () => {
     try {
       setSharedSongs(sharedDatabase.getAllSharedSongs());
+      setSelectedSongs([]);
+      setSelectAll(false);
     } catch (error) {
       alert('Failed to refresh songs');
+    }
+  };
+  
+  const handleToggleSelectAll = () => {
+    if (selectAll) {
+      setSelectedSongs([]);
+    } else {
+      const activeSongIds = sharedSongs
+        .filter(song => song.status === 'active')
+        .map(song => song.id);
+      setSelectedSongs(activeSongIds);
+    }
+    setSelectAll(!selectAll);
+  };
+  
+  const handleToggleSelectSong = (songId: string) => {
+    setSelectedSongs(prev => {
+      if (prev.includes(songId)) {
+        return prev.filter(id => id !== songId);
+      } else {
+        return [...prev, songId];
+      }
+    });
+  };
+  
+  const handleBulkDeleteSongs = async () => {
+    if (selectedSongs.length === 0) {
+      alert('No songs selected');
+      return;
+    }
+    
+    if (confirm(`Are you sure you want to remove ${selectedSongs.length} song(s) from the community database?`)) {
+      try {
+        // Use the bulk delete method for better efficiency
+        const result = await sharedDatabase.bulkDeleteSongs(selectedSongs, user!.id);
+        
+        // Refresh the song list
+        setSharedSongs(sharedDatabase.getAllSharedSongs());
+        setSelectedSongs([]);
+        setSelectAll(false);
+        
+        if (result.failed > 0) {
+          alert(`Successfully removed ${result.success} song(s). Failed to remove ${result.failed} song(s).`);
+        } else {
+          alert(`Successfully removed ${result.success} song(s)`);
+        }
+      } catch (error) {
+        alert('Failed to delete songs');
+      }
     }
   };
 
@@ -294,18 +361,42 @@ const AdminPanel: React.FC = () => {
               <h2 className="text-xl font-semibold text-white">Community Songs Management</h2>
               <span className="text-gray-400">({sharedSongs.length} total)</span>
             </div>
-            <button
-              onClick={refreshSharedSongs}
-              className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors"
-            >
-              Refresh
-            </button>
+            <div className="flex items-center space-x-3">
+              {selectedSongs.length > 0 && (
+                <button
+                  onClick={handleBulkDeleteSongs}
+                  className="flex items-center space-x-2 px-4 py-2 bg-red-500/80 text-white rounded-lg hover:bg-red-600 transition-colors"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>Delete Selected ({selectedSongs.length})</span>
+                </button>
+              )}
+              <button
+                onClick={refreshSharedSongs}
+                className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors"
+              >
+                Refresh
+              </button>
+            </div>
           </div>
 
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead>
                 <tr className="border-b border-white/10">
+                  <th className="pb-3 text-gray-300 font-medium">
+                    <button 
+                      onClick={handleToggleSelectAll}
+                      className="p-1 hover:bg-white/10 rounded transition-colors"
+                      title={selectAll ? "Deselect all" : "Select all active songs"}
+                    >
+                      {selectAll ? (
+                        <CheckSquare className="w-5 h-5 text-purple-400" />
+                      ) : (
+                        <Square className="w-5 h-5 text-gray-400" />
+                      )}
+                    </button>
+                  </th>
                   <th className="pb-3 text-gray-300 font-medium">Song</th>
                   <th className="pb-3 text-gray-300 font-medium">Uploader</th>
                   <th className="pb-3 text-gray-300 font-medium">Uploaded</th>
@@ -317,6 +408,23 @@ const AdminPanel: React.FC = () => {
               <tbody>
                 {sharedSongs.map((song) => (
                   <tr key={song.id} className="border-b border-white/5">
+                    <td className="py-4">
+                      {song.status === 'active' ? (
+                        <button 
+                          onClick={() => handleToggleSelectSong(song.id)}
+                          className="p-1 hover:bg-white/10 rounded transition-colors"
+                          title={selectedSongs.includes(song.id) ? "Deselect" : "Select"}
+                        >
+                          {selectedSongs.includes(song.id) ? (
+                            <CheckSquare className="w-5 h-5 text-purple-400" />
+                          ) : (
+                            <Square className="w-5 h-5 text-gray-400" />
+                          )}
+                        </button>
+                      ) : (
+                        <XCircle className="w-5 h-5 text-gray-600 opacity-50" />
+                      )}
+                    </td>
                     <td className="py-4">
                       <div className="flex items-center space-x-3">
                         <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg flex items-center justify-center overflow-hidden">

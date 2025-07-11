@@ -159,6 +159,19 @@ export class AudioMetadataExtractor {
     }
   }
 
+  // Process poster image file and return data URL
+  async processPosterImage(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        resolve(result);
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+  }
+
   private async readFileAsArrayBuffer(file: File, start?: number, length?: number): Promise<ArrayBuffer> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();

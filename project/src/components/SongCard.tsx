@@ -89,22 +89,15 @@ const SongCard: React.FC<SongCardProps> = ({
         {/* Song Info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center space-x-3">
-            {song.coverArt ? (
-              <img
-                src={song.coverArt}
-                alt={`${song.title} cover`}
-                className="w-12 h-12 rounded-lg object-cover"
-                onError={(e) => {
-                  e.currentTarget.style.display = 'none';
-                }}
-              />
-            ) : (
-              <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg flex items-center justify-center">
-                <div className="text-white text-lg">
-                  {song.uploadedBy === 'community' ? '🌍' : '🎵'}
-                </div>
-              </div>
-            )}
+            <img
+              src={song.coverArt || '/assets/default-cover.svg'}
+              alt={`${song.title} cover`}
+              className="w-12 h-12 rounded-lg object-cover"
+              onError={(e) => {
+                // If the image fails to load, use the default cover
+                e.currentTarget.src = '/assets/default-cover.svg';
+              }}
+            />
             <div className="min-w-0 flex-1">
               <h3 className={`font-semibold truncate ${
                 isCurrentSong ? 'text-purple-400' : 'text-white'
