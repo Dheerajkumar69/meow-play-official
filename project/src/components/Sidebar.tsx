@@ -15,7 +15,8 @@ import {
   Shield,
   Menu,
   X,
-  Globe
+  Globe,
+  Cloud
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { mockPlaylists } from '../utils/mockData';
@@ -34,6 +35,7 @@ const Sidebar: React.FC = () => {
     { name: 'Liked Songs', href: '/liked', icon: Heart },
     { name: 'Recently Played', href: '/recent', icon: Clock },
     { name: 'Upload', href: '/upload', icon: Upload },
+    { name: 'Server Songs', href: '/server-songs', icon: Cloud },
   ];
 
   // Add admin panel for admin users

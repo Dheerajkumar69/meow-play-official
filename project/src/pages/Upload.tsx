@@ -1,9 +1,10 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Upload as UploadIcon, X, Music, CheckCircle, AlertCircle, FileAudio, Sparkles, Share, Database } from 'lucide-react';
+import { Upload as UploadIcon, X, Music, CheckCircle, AlertCircle, FileAudio, Sparkles, Share, Database, Cloud, HardDrive } from 'lucide-react';
 import { useMusic } from '../contexts/MusicContext';
 import { useAuth } from '../contexts/AuthContext';
 import { audioMetadataExtractor, AudioMetadata } from '../utils/audioMetadata';
 import { sharedDatabase } from '../utils/sharedDatabase';
+import { songsAPI } from '../utils/api';
 import { v4 as uuidv4 } from 'uuid';
 
 interface UploadProgress {
@@ -17,6 +18,7 @@ interface FileWithMetadata {
   metadata: AudioMetadata;
   id: string;
   shareToDatabase: boolean;
+  uploadToServer: boolean;
   posterFile?: File;
   posterPreview?: string;
 }
@@ -75,7 +77,8 @@ const Upload: React.FC = () => {
           file,
           metadata,
           id: uuidv4(),
-          shareToDatabase: true // Default to sharing
+          shareToDatabase: true, // Default to sharing locally
+          uploadToServer: true // Default to uploading to server
         });
       } catch (error) {
         console.error(`Failed to process ${file.name}:`, error);
@@ -87,7 +90,8 @@ const Upload: React.FC = () => {
             artist: 'Unknown Artist'
           },
           id: uuidv4(),
-          shareToDatabase: true
+          shareToDatabase: true,
+          uploadToServer: true
         });
       }
     }
@@ -166,6 +170,14 @@ const Upload: React.FC = () => {
         : item
     ));
   }, []);
+  
+  const toggleUploadToServer = useCallback((fileId: string) => {
+    setSelectedFiles(prev => prev.map(item => 
+      item.id === fileId 
+        ? { ...item, uploadToServer: !item.uploadToServer }
+        : item
+    ));
+  }, []);
   const removeFile = useCallback((fileId: string) => {
     setSelectedFiles(prev => {
       const fileToRemove = prev.find(item => item.id === fileId);
@@ -214,8 +226,9 @@ const Upload: React.FC = () => {
       // Process each file
       const newSongs = [];
       const sharedSongs = [];
+      const serverSongs = [];
 
-      for (const { file, metadata, shareToDatabase, posterFile } of selectedFiles) {
+      for (const { file, metadata, shareToDatabase, uploadToServer, posterFile } of selectedFiles) {
         // Create local song with blob URL for immediate playback
         const localBlobUrl = URL.createObjectURL(file);
         
@@ -236,7 +249,7 @@ const Upload: React.FC = () => {
 
         newSongs.push(localSong);
 
-        // Share to database if enabled
+        // Share to local database if enabled
         if (shareToDatabase && user) {
           try {
             const sharedSong = await sharedDatabase.uploadToSharedDatabase(
@@ -255,7 +268,32 @@ const Upload: React.FC = () => {
             );
             sharedSongs.push(sharedSong);
           } catch (error) {
-            console.error('Failed to share song to database:', error);
+            console.error('Failed to share song to local database:', error);
+          }
+        }
+        
+        // Upload to server if enabled
+        if (uploadToServer && user) {
+          try {
+            const songData = {
+              title: metadata.title || file.name.replace(/\.[^/.]+$/, ''),
+              artist: metadata.artist || 'Unknown Artist',
+              album: metadata.album,
+              genre: metadata.genre,
+              duration: metadata.duration || 180,
+              year: metadata.year,
+              mood: metadata.mood
+            };
+            
+            const serverSong = await songsAPI.uploadSong(file, songData, posterFile);
+            serverSongs.push(serverSong);
+          } catch (error) {
+            console.error('Failed to upload song to server:', error);
+            // Show error in UI
+            setUploadProgress(prev => ({
+              ...prev,
+              message: `${prev.message || ''} Error uploading to server: ${error.message || 'Unknown error'}`
+            }));
           }
         }
       }
@@ -288,7 +326,7 @@ const Upload: React.FC = () => {
       setUploadProgress({ 
         progress: 100, 
         status: 'success', 
-        message: `Successfully uploaded ${newSongs.length} song${newSongs.length > 1 ? 's' : ''}! ${sharedSongs.length > 0 ? `${sharedSongs.length} shared to community! 🐱` : '🐱'}` 
+        message: `Successfully uploaded ${newSongs.length} song${newSongs.length > 1 ? 's' : ''}! ${sharedSongs.length > 0 ? `${sharedSongs.length} shared locally! ` : ''}${serverSongs.length > 0 ? `${serverSongs.length} uploaded to server! 🐱` : '🐱'}` 
       });
 
       // Reset status after 3 seconds
@@ -581,10 +619,10 @@ const Upload: React.FC = () => {
                   <div className="mt-4 p-4 bg-gradient-to-r from-purple-500/20 to-pink-500/20 border border-purple-500/30 rounded-lg">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-3">
-                        <Database className="w-5 h-5 text-purple-400" />
+                        <HardDrive className="w-5 h-5 text-purple-400" />
                         <div>
-                          <h4 className="text-white font-medium">Share to Community Database</h4>
-                          <p className="text-gray-400 text-sm">Let other users discover and enjoy this song</p>
+                          <h4 className="text-white font-medium">Share to Local Database</h4>
+                          <p className="text-gray-400 text-sm">Store this song in your local device database</p>
                         </div>
                       </div>
                       <button
@@ -606,7 +644,43 @@ const Upload: React.FC = () => {
                         <div className="flex items-center space-x-2">
                           <Share className="w-4 h-4 text-green-400" />
                           <span className="text-green-300 text-sm">
-                            This song will be shared to the community database with auto-detected metadata
+                            This song will be stored in your local device database
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Upload to Server Option */}
+                  <div className="mt-4 p-4 bg-gradient-to-r from-blue-500/20 to-cyan-500/20 border border-blue-500/30 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        <Cloud className="w-5 h-5 text-blue-400" />
+                        <div>
+                          <h4 className="text-white font-medium">Upload to Server</h4>
+                          <p className="text-gray-400 text-sm">Store this song on the server for cross-device access</p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => toggleUploadToServer(fileItem.id)}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                          fileItem.uploadToServer ? 'bg-blue-500' : 'bg-gray-600'
+                        }`}
+                      >
+                        <span
+                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                            fileItem.uploadToServer ? 'translate-x-6' : 'translate-x-1'
+                          }`}
+                        />
+                      </button>
+                    </div>
+                    {fileItem.uploadToServer && (
+                      <div className="mt-3 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+                        <div className="flex items-center space-x-2">
+                          <Cloud className="w-4 h-4 text-blue-400" />
+                          <span className="text-blue-300 text-sm">
+                            This song will be uploaded to the server for access across all your devices
                           </span>
                         </div>
                       </div>

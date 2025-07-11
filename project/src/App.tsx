@@ -18,6 +18,7 @@ import RecentlyPlayed from './pages/RecentlyPlayed';
 import Trending from './pages/Trending';
 import Discover from './pages/Discover';
 import PlaylistDetail from './pages/PlaylistDetail';
+import ServerSongs from './pages/ServerSongs';
 import AdminPanel from './components/AdminPanel';
 import NotFound from './pages/NotFound';
 
@@ -101,6 +102,14 @@ function App() {
                   element={
                     <ProtectedRoute>
                       <Upload />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="server-songs"
+                  element={
+                    <ProtectedRoute>
+                      <ServerSongs />
                     </ProtectedRoute>
                   }
                 />
