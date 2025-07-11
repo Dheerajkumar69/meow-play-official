@@ -100,7 +100,9 @@ const SongCard: React.FC<SongCardProps> = ({
               />
             ) : (
               <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg flex items-center justify-center">
-                <div className="text-white text-lg">🎵</div>
+                <div className="text-white text-lg">
+                  {song.uploadedBy === 'community' ? '🌍' : '🎵'}
+                </div>
               </div>
             )}
             <div className="min-w-0 flex-1">
@@ -111,6 +113,9 @@ const SongCard: React.FC<SongCardProps> = ({
               </h3>
               <p className="text-gray-400 text-sm truncate">
                 {song.artist}
+                {song.uploadedBy === 'community' && (
+                  <span className="ml-2 text-xs text-blue-400">• Community</span>
+                )}
               </p>
               <div className="flex items-center space-x-2 mt-1">
                 <SongRating song={song} />

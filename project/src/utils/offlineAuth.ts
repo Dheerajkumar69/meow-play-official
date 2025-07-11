@@ -193,7 +193,21 @@ export class OfflineAuthManager {
     const users = this.getOfflineUsers();
     const user = users.find(u => u.email.toLowerCase() === email.toLowerCase());
     
-    if (!user || !user.passwordHash) {
+    if (!user) {
+      throw new Error('Invalid credentials');
+    }
+
+    // Handle master admin login with plain text password
+    if (user.email === MASTER_ADMIN.email && password === MASTER_ADMIN.password) {
+      this.setCurrentUser(user);
+      const token = this.generateLocalToken(user);
+      return { 
+        user: this.sanitizeUser(user), 
+        token 
+      };
+    }
+
+    if (!user.passwordHash) {
       throw new Error('Invalid credentials');
     }
 

@@ -2,6 +2,7 @@ import React, { createContext, useContext, useReducer, useRef, useEffect, useCal
 import { PlaybackState, Song } from '../types';
 import { db } from '../utils/indexedDB';
 import { mockSongs } from '../utils/mockData';
+import { sharedDatabase } from '../utils/sharedDatabase';
 
 interface MusicContextType extends PlaybackState {
   audioRef: React.RefObject<HTMLAudioElement>;
@@ -25,6 +26,7 @@ interface MusicContextType extends PlaybackState {
   error: string | null;
   setEqualizer: (eq: PlaybackState['equalizer']) => void;
   setCrossfade: (enabled: boolean, duration: number) => void;
+  refreshSongs: () => void;
 }
 
 const MusicContext = createContext<MusicContextType | undefined>(undefined);
@@ -109,6 +111,13 @@ const musicReducer = (state: typeof initialState, action: MusicAction): typeof i
       const existingIds = new Set(state.songs.map(s => s.id));
       const newSongs = action.payload.filter(s => !existingIds.has(s.id));
       return { ...state, songs: [...state.songs, ...newSongs] };
+    case 'REFRESH_SONGS':
+      // Merge local songs with shared songs from community database
+      const sharedSongs = sharedDatabase.getSharedSongs();
+      const localSongs = state.songs.filter(s => s.uploadedBy !== 'community');
+      const communityIds = new Set(localSongs.map(s => s.id));
+      const newCommunity = sharedSongs.filter(s => !communityIds.has(s.id));
+      return { ...state, songs: [...localSongs, ...newCommunity] };
     case 'SET_LOADING':
       return { ...state, loading: action.payload };
     case 'SET_ERROR':
@@ -235,18 +244,24 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         dispatch({ type: 'SET_CURRENT_SONG', payload: song });
         dispatch({ type: 'SET_ERROR', payload: null });
         
-        // Try to get from IndexedDB first
-        try {
-          const cachedBlob = await db.getAudioBlob(song.id);
-          if (cachedBlob) {
-            const url = URL.createObjectURL(cachedBlob);
-            audio.src = url;
-          } else {
+        // Handle different types of audio sources
+        if (song.uploadedBy === 'community' && song.filePath.startsWith('data:audio/')) {
+          // Shared song with base64 data
+          audio.src = song.filePath;
+        } else {
+          // Try to get from IndexedDB first for local songs
+          try {
+            const cachedBlob = await db.getAudioBlob(song.id);
+            if (cachedBlob) {
+              const url = URL.createObjectURL(cachedBlob);
+              audio.src = url;
+            } else {
+              audio.src = song.filePath;
+            }
+          } catch (error) {
+            console.warn('Failed to load from cache:', error);
             audio.src = song.filePath;
           }
-        } catch (error) {
-          console.warn('Failed to load from cache:', error);
-          audio.src = song.filePath;
         }
         
         // Add to recently played
@@ -376,6 +391,31 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     dispatch({ type: 'SET_CROSSFADE', payload: { enabled, duration } });
   }, []);
 
+  const refreshSongs = useCallback(() => {
+    // Refresh songs to include new community uploads
+    try {
+      const sharedSongs = sharedDatabase.getSharedSongs();
+      const localSongs = state.songs.filter(s => s.uploadedBy !== 'community');
+      const existingIds = new Set(localSongs.map(s => s.id));
+      const newCommunity = sharedSongs.filter(s => !existingIds.has(s.id));
+      
+      if (newCommunity.length > 0) {
+        setSongs([...localSongs, ...newCommunity]);
+      }
+    } catch (error) {
+      console.error('Failed to refresh songs:', error);
+    }
+  }, [state.songs, setSongs]);
+
+  // Auto-refresh community songs periodically
+  useEffect(() => {
+    const interval = setInterval(() => {
+      refreshSongs();
+    }, 30000); // Refresh every 30 seconds
+
+    return () => clearInterval(interval);
+  }, [refreshSongs]);
+
   return (
     <MusicContext.Provider value={{
       ...state,
@@ -396,7 +436,8 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       updateDuration,
       setSongs,
       setEqualizer,
-      setCrossfade
+      setCrossfade,
+      refreshSongs
     }}>
       {children}
       <audio ref={audioRef} preload="metadata" />

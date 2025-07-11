@@ -1,7 +1,9 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Upload as UploadIcon, X, Music, CheckCircle, AlertCircle, FileAudio, Sparkles } from 'lucide-react';
+import { Upload as UploadIcon, X, Music, CheckCircle, AlertCircle, FileAudio, Sparkles, Share, Database } from 'lucide-react';
 import { useMusic } from '../contexts/MusicContext';
+import { useAuth } from '../contexts/AuthContext';
 import { audioMetadataExtractor, AudioMetadata } from '../utils/audioMetadata';
+import { sharedDatabase } from '../utils/sharedDatabase';
 import { v4 as uuidv4 } from 'uuid';
 
 interface UploadProgress {
@@ -14,6 +16,7 @@ interface FileWithMetadata {
   file: File;
   metadata: AudioMetadata;
   id: string;
+  shareToDatabase: boolean;
 }
 
 const Upload: React.FC = () => {
@@ -23,6 +26,7 @@ const Upload: React.FC = () => {
   const [processingFiles, setProcessingFiles] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { songs, setSongs } = useMusic();
+  const { user } = useAuth();
 
   // Cleanup object URLs on unmount
   useEffect(() => {
@@ -68,7 +72,8 @@ const Upload: React.FC = () => {
         processedFiles.push({
           file,
           metadata,
-          id: uuidv4()
+          id: uuidv4(),
+          shareToDatabase: true // Default to sharing
         });
       } catch (error) {
         console.error(`Failed to process ${file.name}:`, error);
@@ -79,7 +84,8 @@ const Upload: React.FC = () => {
             title: file.name.replace(/\.[^/.]+$/, ''),
             artist: 'Unknown Artist'
           },
-          id: uuidv4()
+          id: uuidv4(),
+          shareToDatabase: true
         });
       }
     }
@@ -127,6 +133,13 @@ const Upload: React.FC = () => {
     ));
   }, []);
 
+  const toggleShareToDatabase = useCallback((fileId: string) => {
+    setSelectedFiles(prev => prev.map(item => 
+      item.id === fileId 
+        ? { ...item, shareToDatabase: !item.shareToDatabase }
+        : item
+    ));
+  }, []);
   const removeFile = useCallback((fileId: string) => {
     setSelectedFiles(prev => {
       const fileToRemove = prev.find(item => item.id === fileId);
@@ -172,8 +185,56 @@ const Upload: React.FC = () => {
       // Simulate upload process with progress
       await simulateUploadProgress();
 
-      // Create new song objects
-      const newSongs = selectedFiles.map(({ file, metadata }) => ({
+      // Process each file
+      const newSongs = [];
+      const sharedSongs = [];
+
+      for (const { file, metadata, shareToDatabase } of selectedFiles) {
+        // Create local song with blob URL for immediate playback
+        const localBlobUrl = URL.createObjectURL(file);
+        
+        const localSong = {
+          id: uuidv4(),
+          title: metadata.title || file.name.replace(/\.[^/.]+$/, ''),
+          artist: metadata.artist || 'Unknown Artist',
+          album: metadata.album,
+          genre: metadata.genre,
+          duration: metadata.duration || 180,
+          filePath: localBlobUrl,
+          coverArt: metadata.coverArt,
+          uploadedBy: user?.id || '1',
+          createdAt: new Date(),
+          playCount: 0,
+          year: metadata.year
+        };
+
+        newSongs.push(localSong);
+
+        // Share to database if enabled
+        if (shareToDatabase && user) {
+          try {
+            const sharedSong = await sharedDatabase.uploadToSharedDatabase(
+              file,
+              user.id,
+              user.username,
+              {
+                title: metadata.title,
+                artist: metadata.artist,
+                album: metadata.album,
+                genre: metadata.genre,
+                coverArt: metadata.coverArt,
+                year: metadata.year
+              }
+            );
+            sharedSongs.push(sharedSong);
+          } catch (error) {
+            console.error('Failed to share song to database:', error);
+          }
+        }
+      }
+
+      // Create new song objects (keeping original logic)
+      /*const newSongs = selectedFiles.map(({ file, metadata }) => ({
         id: uuidv4(),
         title: metadata.title || file.name.replace(/\.[^/.]+$/, ''),
         artist: metadata.artist || 'Unknown Artist',
@@ -186,7 +247,7 @@ const Upload: React.FC = () => {
         createdAt: new Date(),
         playCount: 0,
         year: metadata.year
-      }));
+      }));*/
 
       // Add to songs list
       setSongs([...newSongs, ...songs]);
@@ -200,7 +261,7 @@ const Upload: React.FC = () => {
       setUploadProgress({ 
         progress: 100, 
         status: 'success', 
-        message: `Successfully uploaded ${newSongs.length} song${newSongs.length > 1 ? 's' : ''}! 🐱` 
+        message: `Successfully uploaded ${newSongs.length} song${newSongs.length > 1 ? 's' : ''}! ${sharedSongs.length > 0 ? `${sharedSongs.length} shared to community! 🐱` : '🐱'}` 
       });
 
       // Reset status after 3 seconds
@@ -443,6 +504,42 @@ const Upload: React.FC = () => {
                       </select>
                     </div>
                   </div>
+
+                  {/* Share to Database Option */}
+                  <div className="mt-4 p-4 bg-gradient-to-r from-purple-500/20 to-pink-500/20 border border-purple-500/30 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        <Database className="w-5 h-5 text-purple-400" />
+                        <div>
+                          <h4 className="text-white font-medium">Share to Community Database</h4>
+                          <p className="text-gray-400 text-sm">Let other users discover and enjoy this song</p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => toggleShareToDatabase(fileItem.id)}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                          fileItem.shareToDatabase ? 'bg-purple-500' : 'bg-gray-600'
+                        }`}
+                      >
+                        <span
+                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                            fileItem.shareToDatabase ? 'translate-x-6' : 'translate-x-1'
+                          }`}
+                        />
+                      </button>
+                    </div>
+                    {fileItem.shareToDatabase && (
+                      <div className="mt-3 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
+                        <div className="flex items-center space-x-2">
+                          <Share className="w-4 h-4 text-green-400" />
+                          <span className="text-green-300 text-sm">
+                            This song will be shared to the community database with auto-detected metadata
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -475,6 +572,65 @@ const Upload: React.FC = () => {
 
       {/* Features Info */}
       <div className="bg-gradient-to-r from-purple-500/20 to-pink-500/20 border border-purple-500/30 rounded-lg p-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div>
+            <h3 className="text-xl font-semibold text-white mb-4 flex items-center space-x-2">
+              <Sparkles className="w-6 h-6 text-purple-400" />
+              <span>Smart Detection Features</span>
+            </h3>
+            <div className="space-y-3 text-sm">
+              <div>
+                <h4 className="text-purple-400 font-medium mb-2">🎵 Metadata Extraction</h4>
+                <p className="text-gray-300">
+                  Automatically detects title, artist, album, and genre from file metadata and filename patterns.
+                </p>
+              </div>
+              <div>
+                <h4 className="text-green-400 font-medium mb-2">⏱️ Duration Detection</h4>
+                <p className="text-gray-300">
+                  Analyzes audio files to determine exact duration and other technical details.
+                </p>
+              </div>
+              <div>
+                <h4 className="text-blue-400 font-medium mb-2">🖼️ Cover Art Support</h4>
+                <p className="text-gray-300">
+                  Extracts embedded album artwork when available in the audio file.
+                </p>
+              </div>
+            </div>
+          </div>
+          
+          <div>
+            <h3 className="text-xl font-semibold text-white mb-4 flex items-center space-x-2">
+              <Database className="w-6 h-6 text-purple-400" />
+              <span>Community Sharing</span>
+            </h3>
+            <div className="space-y-3 text-sm">
+              <div>
+                <h4 className="text-purple-400 font-medium mb-2">🌍 Global Database</h4>
+                <p className="text-gray-300">
+                  Share your music with the entire Meow-Play community automatically.
+                </p>
+              </div>
+              <div>
+                <h4 className="text-green-400 font-medium mb-2">🔍 Auto-Discovery</h4>
+                <p className="text-gray-300">
+                  Other users can discover your uploads through search and recommendations.
+                </p>
+              </div>
+              <div>
+                <h4 className="text-blue-400 font-medium mb-2">👑 Admin Control</h4>
+                <p className="text-gray-300">
+                  Only administrators can remove songs from the shared database.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Old Features Info - keeping for reference */}
+      <div className="bg-gradient-to-r from-purple-500/20 to-pink-500/20 border border-purple-500/30 rounded-lg p-6" style={{ display: 'none' }}>
         <h3 className="text-xl font-semibold text-white mb-4 flex items-center space-x-2">
           <Sparkles className="w-6 h-6 text-purple-400" />
           <span>Smart Detection Features</span>

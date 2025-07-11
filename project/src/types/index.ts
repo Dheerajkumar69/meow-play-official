@@ -34,6 +34,7 @@ export interface Song {
   license?: string;
   source?: string;
   description?: string;
+  year?: number;
 }
 
 export interface Comment {
