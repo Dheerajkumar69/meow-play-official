@@ -28,8 +28,8 @@ export interface SpotifyPlaylist {
 }
 
 class SpotifyIntegrationManager {
-  private clientId: string = '';
-  private clientSecret: string = '';
+  private clientId: string = 'your_client_id_here';
+  private clientSecret: string = 'your_client_secret_here';
   private accessToken: string = '';
 
   // Note: In a real implementation, you would:
@@ -50,7 +50,7 @@ class SpotifyIntegrationManager {
       // For now, we'll return mock data to demonstrate the concept
       return this.getMockPlaylistData(playlistId);
     } catch (error) {
-      console.error('Failed to fetch Spotify playlist:', error);
+      // Failed to fetch Spotify playlist
       return null;
     }
   }
@@ -145,11 +145,11 @@ class SpotifyIntegrationManager {
   }
 
   // Alternative approach using spotdl (conceptual)
-  async downloadWithSpotdl(playlistUrl: string): Promise<string[]> {
+  async downloadWithSpotdl(_playlistUrl: string): Promise<string[]> {
     // Note: This would require a backend service to run spotdl
     // spotdl is a Python tool that can't run directly in the browser
     
-    console.log('Spotify playlist download requested:', playlistUrl);
+    // Spotify playlist download requested
     
     // In a real implementation, you would:
     // 1. Send the playlist URL to your backend
@@ -188,13 +188,13 @@ export const spotifyIntegration = new SpotifyIntegrationManager();
 // Example usage function for demonstration
 export async function demonstrateSpotifyIntegration(playlistUrl: string) {
   try {
-    console.log('Spotify Integration Demo');
-    console.log('Legal Guidelines:', spotifyIntegration.getUsageGuidelines());
+    // Spotify Integration Demo
+    // Legal Guidelines: spotifyIntegration.getUsageGuidelines()
     
     const playlist = await spotifyIntegration.getPlaylistInfo(playlistUrl);
     if (playlist) {
-      console.log('Playlist Info:', playlist.name);
-      console.log('Track Count:', playlist.tracks.items.length);
+      // Playlist Info: playlist.name
+      // Track Count: playlist.tracks.items.length
       
       // Convert tracks to local format
       const localSongs = playlist.tracks.items.map(item => 
@@ -206,7 +206,7 @@ export async function demonstrateSpotifyIntegration(playlistUrl: string) {
     
     return [];
   } catch (error) {
-    console.error('Spotify integration error:', error);
+    // Spotify integration error
     return [];
   }
 }

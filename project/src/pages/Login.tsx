@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Music, Eye, EyeOff, Shield, Loader } from 'lucide-react';
+import { Eye, EyeOff, Loader } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { MASTER_ADMIN } from '../utils/offlineAuth';
 
 const Login: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -47,11 +46,6 @@ const Login: React.FC = () => {
     }
   };
 
-  const fillMasterCredentials = () => {
-    setEmail(MASTER_ADMIN.email);
-    setPassword(MASTER_ADMIN.password);
-    setError('');
-  };
 
   const isLoading = loading || isSubmitting;
 
@@ -69,25 +63,6 @@ const Login: React.FC = () => {
           <p className="text-gray-400 mt-2">Sign in to your purr-fect music experience</p>
         </div>
 
-        {/* Master Admin Quick Login */}
-        <div className="bg-gradient-to-r from-purple-500/20 to-pink-500/20 border border-purple-500/30 rounded-lg p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <Shield className="w-5 h-5 text-purple-400" />
-              <span className="text-white font-medium">Master Admin Login</span>
-            </div>
-            <button
-              onClick={fillMasterCredentials}
-              disabled={isLoading}
-              className="px-3 py-1 bg-purple-500 text-white text-sm rounded-lg hover:bg-purple-600 disabled:opacity-50 transition-colors"
-            >
-              Use Admin
-            </button>
-          </div>
-          <p className="text-gray-300 text-sm mt-2">
-            Click "Use Admin" to auto-fill master admin credentials for testing
-          </p>
-        </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="space-y-4">
@@ -169,10 +144,10 @@ const Login: React.FC = () => {
           </div>
         </form>
 
-        {/* Offline Notice */}
+        {/* Supabase Notice */}
         <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
           <p className="text-blue-300 text-sm text-center">
-            🔒 Your login data is stored locally and syncs when online
+            🔒 Your data is securely stored with Supabase
           </p>
         </div>
       </div>

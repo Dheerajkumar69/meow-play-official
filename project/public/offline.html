@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meow-Play - Offline</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1f2937 0%, #374151 100%);
+            color: white;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .offline-container {
+            max-width: 500px;
+            padding: 40px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .cat-icon {
+            font-size: 80px;
+            margin-bottom: 20px;
+            animation: bounce 2s infinite;
+        }
+        
+        @keyframes bounce {
+            0%, 20%, 50%, 80%, 100% {
+                transform: translateY(0);
+            }
+            40% {
+                transform: translateY(-10px);
+            }
+            60% {
+                transform: translateY(-5px);
+            }
+        }
+        
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 16px;
+            background: linear-gradient(45deg, #8b5cf6, #ec4899);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        p {
+            font-size: 1.1rem;
+            line-height: 1.6;
+            margin-bottom: 30px;
+            opacity: 0.9;
+        }
+        
+        .retry-btn {
+            background: linear-gradient(45deg, #8b5cf6, #ec4899);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 25px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-right: 15px;
+        }
+        
+        .retry-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(139, 92, 246, 0.3);
+        }
+        
+        .cached-songs {
+            margin-top: 30px;
+            padding: 20px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 15px;
+            text-align: left;
+        }
+        
+        .cached-songs h3 {
+            margin-bottom: 15px;
+            color: #8b5cf6;
+        }
+        
+        .song-item {
+            display: flex;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .song-item:last-child {
+            border-bottom: none;
+        }
+        
+        .play-icon {
+            margin-right: 10px;
+            color: #8b5cf6;
+        }
+        
+        .connection-status {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+        
+        .offline {
+            background: #ef4444;
+        }
+        
+        .online {
+            background: #10b981;
+        }
+    </style>
+</head>
+<body>
+    <div class="connection-status offline" id="connectionStatus">
+        📡 Offline
+    </div>
+    
+    <div class="offline-container">
+        <div class="cat-icon">🐱</div>
+        <h1>You're Offline!</h1>
+        <p>
+            No internet connection detected. Don't worry, you can still enjoy your downloaded music 
+            and cached content while offline.
+        </p>
+        
+        <button class="retry-btn" onclick="checkConnection()">
+            🔄 Check Connection
+        </button>
+        
+        <button class="retry-btn" onclick="goToApp()" style="background: rgba(255, 255, 255, 0.2);">
+            🏠 Go to App
+        </button>
+        
+        <div class="cached-songs" id="cachedSongs">
+            <h3>🎵 Available Offline</h3>
+            <div id="songList">
+                <div class="song-item">
+                    <span class="play-icon">▶️</span>
+                    <span>Loading cached songs...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Check connection status
+        function updateConnectionStatus() {
+            const status = document.getElementById('connectionStatus');
+            if (navigator.onLine) {
+                status.textContent = '🌐 Online';
+                status.className = 'connection-status online';
+            } else {
+                status.textContent = '📡 Offline';
+                status.className = 'connection-status offline';
+            }
+        }
+
+        // Check connection and redirect if online
+        function checkConnection() {
+            updateConnectionStatus();
+            if (navigator.onLine) {
+                window.location.href = '/';
+            } else {
+                // Show feedback
+                const btn = event.target;
+                const originalText = btn.textContent;
+                btn.textContent = '❌ Still Offline';
+                btn.style.background = '#ef4444';
+                
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                    btn.style.background = '';
+                }, 2000);
+            }
+        }
+
+        // Go to app regardless of connection
+        function goToApp() {
+            window.location.href = '/';
+        }
+
+        // Load cached songs
+        async function loadCachedSongs() {
+            const songList = document.getElementById('songList');
+            
+            try {
+                if ('caches' in window) {
+                    const cache = await caches.open('meow-play-audio-v1');
+                    const requests = await cache.keys();
+                    
+                    if (requests.length === 0) {
+                        songList.innerHTML = '<div class="song-item"><span>No offline songs available</span></div>';
+                        return;
+                    }
+                    
+                    songList.innerHTML = '';
+                    requests.slice(0, 10).forEach((request, index) => {
+                        const url = new URL(request.url);
+                        const filename = url.pathname.split('/').pop() || 'Unknown Song';
+                        const songName = filename.replace(/\.[^/.]+$/, "").replace(/_/g, ' ');
+                        
+                        const songItem = document.createElement('div');
+                        songItem.className = 'song-item';
+                        songItem.innerHTML = `
+                            <span class="play-icon">🎵</span>
+                            <span>${songName}</span>
+                        `;
+                        songItem.style.cursor = 'pointer';
+                        songItem.onclick = () => playCachedSong(request.url);
+                        
+                        songList.appendChild(songItem);
+                    });
+                    
+                    if (requests.length > 10) {
+                        const moreItem = document.createElement('div');
+                        moreItem.className = 'song-item';
+                        moreItem.innerHTML = `<span>+ ${requests.length - 10} more songs available</span>`;
+                        moreItem.style.opacity = '0.7';
+                        songList.appendChild(moreItem);
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to load cached songs:', error);
+                songList.innerHTML = '<div class="song-item"><span>Error loading cached songs</span></div>';
+            }
+        }
+
+        // Play cached song
+        function playCachedSong(url) {
+            // In a real implementation, this would integrate with the main app
+            window.location.href = `/?play=${encodeURIComponent(url)}`;
+        }
+
+        // Event listeners
+        window.addEventListener('online', () => {
+            updateConnectionStatus();
+            setTimeout(() => {
+                window.location.href = '/';
+            }, 1000);
+        });
+
+        window.addEventListener('offline', updateConnectionStatus);
+
+        // Initialize
+        updateConnectionStatus();
+        loadCachedSongs();
+
+        // Auto-check connection every 30 seconds
+        setInterval(() => {
+            if (navigator.onLine) {
+                window.location.href = '/';
+            }
+        }, 30000);
+    </script>
+</body>
+</html>

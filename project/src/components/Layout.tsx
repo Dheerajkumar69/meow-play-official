@@ -30,7 +30,7 @@ const Layout: React.FC = () => {
       
       <div className="flex-1 flex overflow-hidden">
         <Sidebar />
-        <main className="flex-1 overflow-y-auto lg:pl-0 pl-0">
+        <main className="flex-1 overflow-y-auto px-2 xxs:px-3 sm:px-4 md:px-6">
           <div className="lg:hidden h-16" /> {/* Spacer for mobile menu button */}
           <Outlet />
         </main>

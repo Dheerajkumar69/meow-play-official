@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Clock, Play, Filter, Music } from 'lucide-react';
+import { Clock, Play, Search, Filter } from 'lucide-react';
 import SongCard from '../components/SongCard';
 import { useMusic } from '../contexts/MusicContext';
 import { Song } from '../types';

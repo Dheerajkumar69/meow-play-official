@@ -1,10 +1,13 @@
 import React, { createContext, useContext, useReducer, useRef, useEffect, useCallback, ReactNode } from 'react';
-import { PlaybackState, Song } from '../types';
+import { PlaybackState, Song, Repeat } from '../types';
 import { db } from '../utils/indexedDB';
 import { mockSongs } from '../utils/mockData';
 import { sharedDatabase } from '../utils/sharedDatabase';
+import { PlayerManager } from '../utils/playerManager';
+import { CacheManager } from '../utils/cacheManager';
+import { ApiService } from '../services/api';
 
-interface MusicContextType extends PlaybackState {
+export interface MusicContextType extends PlaybackState {
   audioRef: React.RefObject<HTMLAudioElement>;
   play: (song?: Song) => Promise<void>;
   pause: () => void;
@@ -27,9 +30,37 @@ interface MusicContextType extends PlaybackState {
   setEqualizer: (eq: PlaybackState['equalizer']) => void;
   setCrossfade: (enabled: boolean, duration: number) => void;
   refreshSongs: () => void;
+  toggleLike: (songId: string) => void;
+  addToPlaylist: (songId: string, playlistId: string) => void;
+  isRepeating: boolean;
 }
 
-const MusicContext = createContext<MusicContextType | undefined>(undefined);
+export const MusicContext = createContext<MusicContextType | undefined>(undefined);
+
+// MusicAction type is defined below
+
+const initialState: PlaybackState & { songs: Song[]; loading: boolean; error: string | null } = {
+  currentSong: null,
+  isPlaying: false,
+  volume: 0.7,
+  currentTime: 0,
+  duration: 0,
+  queue: [],
+  currentIndex: 0,
+  isShuffled: false,
+  repeat: 'none' as Repeat,
+  crossfadeEnabled: false,
+  crossfadeDuration: 3,
+  equalizer: {
+    bass: 0,
+    mid: 0,
+    treble: 0,
+    enabled: true
+  },
+  songs: mockSongs,
+  loading: false,
+  error: null
+};
 
 type MusicAction = 
   | { type: 'SET_CURRENT_SONG'; payload: Song }
@@ -47,30 +78,9 @@ type MusicAction =
   | { type: 'SET_LOADING'; payload: boolean }
   | { type: 'SET_ERROR'; payload: string | null }
   | { type: 'SET_EQUALIZER'; payload: PlaybackState['equalizer'] }
-  | { type: 'SET_CROSSFADE'; payload: { enabled: boolean; duration: number } };
-
-const initialState: PlaybackState & { songs: Song[]; loading: boolean; error: string | null } = {
-  currentSong: null,
-  isPlaying: false,
-  volume: 0.7,
-  currentTime: 0,
-  duration: 0,
-  queue: [],
-  currentIndex: 0,
-  isShuffled: false,
-  isRepeating: false,
-  crossfadeEnabled: false,
-  crossfadeDuration: 3,
-  equalizer: {
-    bass: 0,
-    mid: 0,
-    treble: 0,
-    enabled: true
-  },
-  songs: mockSongs, // Initialize with all mock songs including new ones
-  loading: false,
-  error: null
-};
+  | { type: 'SET_CROSSFADE'; payload: { enabled: boolean; duration: number } }
+  | { type: 'REFRESH_SONGS' }
+  | { type: 'TOGGLE_LIKE'; payload: string };
 
 const musicReducer = (state: typeof initialState, action: MusicAction): typeof initialState => {
   switch (action.type) {
@@ -92,7 +102,36 @@ const musicReducer = (state: typeof initialState, action: MusicAction): typeof i
       };
     case 'ADD_TO_QUEUE':
       return { ...state, queue: [...state.queue, action.payload] };
-    case 'REMOVE_FROM_QUEUE':
+    case 'TOGGLE_LIKE': {
+      // Update the song in the songs array
+      const updatedSongs = state.songs.map(song => {
+        if (song.id === action.payload) {
+          return { ...song, liked: !song.liked };
+        }
+        return song;
+      });
+      
+      // Update the current song if it's the one being liked/unliked
+      const updatedCurrentSong = state.currentSong && state.currentSong.id === action.payload
+        ? { ...state.currentSong, liked: !state.currentSong.liked }
+        : state.currentSong;
+      
+      // Update the queue if it contains the song being liked/unliked
+      const updatedQueue = state.queue.map(song => {
+        if (song.id === action.payload) {
+          return { ...song, liked: !song.liked };
+        }
+        return song;
+      });
+      
+      return { 
+        ...state, 
+        songs: updatedSongs,
+        currentSong: updatedCurrentSong,
+        queue: updatedQueue
+      };
+    }
+    case 'REMOVE_FROM_QUEUE': {
       const newQueue = state.queue.filter((_, index) => index !== action.payload);
       const newIndex = action.payload < state.currentIndex ? state.currentIndex - 1 : state.currentIndex;
       return { 
@@ -100,18 +139,33 @@ const musicReducer = (state: typeof initialState, action: MusicAction): typeof i
         queue: newQueue,
         currentIndex: Math.max(0, Math.min(newQueue.length - 1, newIndex))
       };
+    }
     case 'SET_CURRENT_INDEX':
       return { ...state, currentIndex: Math.max(0, Math.min(state.queue.length - 1, action.payload)) };
     case 'TOGGLE_SHUFFLE':
       return { ...state, isShuffled: !state.isShuffled };
-    case 'TOGGLE_REPEAT':
-      return { ...state, isRepeating: !state.isRepeating };
-    case 'SET_SONGS':
-      // Ensure we don't lose existing songs when adding new ones
+    case 'TOGGLE_REPEAT': {
+      const nextRepeat = (): Repeat => {
+        switch (state.repeat) {
+          case 'none': return 'one';
+          case 'one': return 'all';
+          case 'all': return 'none';
+        }
+      };
+      return { ...state, repeat: nextRepeat() };
+    }
+    case 'SET_SONGS': {
       const existingIds = new Set(state.songs.map(s => s.id));
       const newSongs = action.payload.filter(s => !existingIds.has(s.id));
       return { ...state, songs: [...state.songs, ...newSongs] };
-
+    }
+    case 'REFRESH_SONGS': {
+      const sharedSongs = sharedDatabase.getSharedSongs();
+      const localSongs = state.songs.filter(s => s.uploadedBy !== 'community');
+      const communityIds = new Set(localSongs.map(s => s.id));
+      const newCommunity = sharedSongs.filter(s => !communityIds.has(s.id));
+      return { ...state, songs: [...localSongs, ...newCommunity] };
+    }
     case 'SET_LOADING':
       return { ...state, loading: action.payload };
     case 'SET_ERROR':
@@ -133,8 +187,149 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [state, dispatch] = useReducer(musicReducer, initialState);
   const audioRef = useRef<HTMLAudioElement>(null);
   const playPromiseRef = useRef<Promise<void> | null>(null);
+  const playerManagerRef = useRef<PlayerManager | null>(null);
+  const cacheManagerRef = useRef<CacheManager | null>(null);
 
-  // Stable callback refs to prevent memory leaks
+  // Core playback functions
+  const play = useCallback(async (song?: Song): Promise<void> => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    try {
+      if (playPromiseRef.current) {
+        await playPromiseRef.current;
+      }
+
+      if (song) {
+        dispatch({ type: 'SET_CURRENT_SONG', payload: song });
+        dispatch({ type: 'SET_ERROR', payload: null });
+        
+        const cachedSong = await cacheManagerRef.current?.get(song.id);
+        if (cachedSong) {
+          audio.src = cachedSong.filePath;
+        } else if (song.uploadedBy === 'community' && song.filePath.startsWith('data:audio/')) {
+          audio.src = song.filePath;
+          void cacheManagerRef.current?.set(song.id, song);
+        } else {
+          audio.src = song.filePath;
+          if (song.id) {
+            void cacheManagerRef.current?.set(song.id, song);
+          }
+        }
+        
+        try {
+          await db.addToRecentlyPlayed(song);
+        } catch (error) {
+          console.warn('Failed to add to recently played:', error);
+        }
+      }
+
+      playPromiseRef.current = audio.play();
+      await playPromiseRef.current;
+      dispatch({ type: 'SET_PLAYING', payload: true });
+    } catch (error) {
+      console.error('Error playing audio:', error);
+      dispatch({ type: 'SET_ERROR', payload: 'Failed to play audio' });
+      dispatch({ type: 'SET_PLAYING', payload: false });
+    } finally {
+      playPromiseRef.current = null;
+    }
+  }, []);
+
+  const pause = useCallback(() => {
+    const audio = audioRef.current;
+    if (audio && !audio.paused) {
+      audio.pause();
+      dispatch({ type: 'SET_PLAYING', payload: false });
+    }
+  }, []);
+
+  const togglePlay = useCallback(() => {
+    if (state.isPlaying) {
+      pause();
+    } else {
+      if (state.currentSong) {
+        void play();
+      } else if (state.queue.length > 0) {
+        void play(state.queue[state.currentIndex]);
+      }
+    }
+  }, [state.isPlaying, state.currentSong, state.queue, state.currentIndex, play, pause]);
+
+  // Navigation functions
+  const getNextIndex = useCallback(() => {
+    if (state.isShuffled) {
+      const availableIndexes = [...Array(state.queue.length).keys()].filter(i => i !== state.currentIndex);
+      if (availableIndexes.length === 0) return null;
+      return availableIndexes[Math.floor(Math.random() * availableIndexes.length)];
+    } else {
+      const nextIndex = state.currentIndex + 1;
+      return nextIndex < state.queue.length ? nextIndex : (state.repeat === 'all' ? 0 : null);
+    }
+  }, [state.isShuffled, state.currentIndex, state.queue.length, state.repeat]);
+
+  const nextSong = useCallback(() => {
+    const nextIndex = getNextIndex();
+    if (nextIndex === null) {
+      dispatch({ type: 'SET_PLAYING', payload: false });
+    } else {
+      dispatch({ type: 'SET_CURRENT_INDEX', payload: nextIndex });
+      const nextSong = state.queue[nextIndex];
+      if (nextSong) {
+        void play(nextSong);
+      }
+    }
+  }, [getNextIndex, state.queue, play]);
+
+  const prevSong = useCallback(() => {
+    if (state.queue.length === 0) return;
+    
+    let prevIndex = state.currentIndex - 1;
+    if (prevIndex < 0) {
+      prevIndex = state.queue.length - 1;
+    }
+    
+    dispatch({ type: 'SET_CURRENT_INDEX', payload: prevIndex });
+    void play(state.queue[prevIndex]);
+  }, [state.queue, state.currentIndex, play]);
+
+  // Queue management functions
+  const addToQueue = useCallback((song: Song) => {
+    dispatch({ type: 'ADD_TO_QUEUE', payload: song });
+  }, []);
+
+  const removeFromQueue = useCallback((index: number) => {
+    if (index >= 0 && index < state.queue.length) {
+      dispatch({ type: 'REMOVE_FROM_QUEUE', payload: index });
+    }
+  }, [state.queue.length]);
+
+  const setQueue = useCallback((songs: Song[], startIndex = 0) => {
+    dispatch({ type: 'SET_QUEUE', payload: { songs, startIndex } });
+  }, []);
+
+  // Playback control functions
+  const toggleShuffle = useCallback(() => {
+    dispatch({ type: 'TOGGLE_SHUFFLE' });
+  }, []);
+
+  const toggleRepeat = useCallback(() => {
+    dispatch({ type: 'TOGGLE_REPEAT' });
+  }, []);
+
+  const setVolume = useCallback((volume: number) => {
+    dispatch({ type: 'SET_VOLUME', payload: volume });
+  }, []);
+
+  const seek = useCallback((time: number) => {
+    const audio = audioRef.current;
+    if (audio && !isNaN(time) && time >= 0 && time <= audio.duration) {
+      audio.currentTime = time;
+      dispatch({ type: 'SET_CURRENT_TIME', payload: time });
+    }
+  }, []);
+
+  // Audio event handlers
   const handleTimeUpdate = useCallback(() => {
     const audio = audioRef.current;
     if (audio && !isNaN(audio.currentTime)) {
@@ -186,181 +381,24 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   }, []);
 
   const handleEnded = useCallback(() => {
-    if (state.isRepeating) {
+    if (state.repeat === 'one') {
       const audio = audioRef.current;
       if (audio) {
         audio.currentTime = 0;
-        audio.play().catch(error => {
-          console.error('Error replaying audio:', error);
-          dispatch({ type: 'SET_ERROR', payload: 'Failed to replay audio' });
-        });
+        void audio.play();
       }
     } else {
-      nextSong();
-    }
-  }, [state.isRepeating]);
-
-  // Set up audio event listeners with proper cleanup
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    audio.volume = state.volume;
-    
-    audio.addEventListener('timeupdate', handleTimeUpdate);
-    audio.addEventListener('durationchange', handleDurationChange);
-    audio.addEventListener('loadstart', handleLoadStart);
-    audio.addEventListener('canplay', handleCanPlay);
-    audio.addEventListener('error', handleError);
-    audio.addEventListener('ended', handleEnded);
-
-    return () => {
-      audio.removeEventListener('timeupdate', handleTimeUpdate);
-      audio.removeEventListener('durationchange', handleDurationChange);
-      audio.removeEventListener('loadstart', handleLoadStart);
-      audio.removeEventListener('canplay', handleCanPlay);
-      audio.removeEventListener('error', handleError);
-      audio.removeEventListener('ended', handleEnded);
-    };
-  }, [state.volume, handleTimeUpdate, handleDurationChange, handleLoadStart, handleCanPlay, handleError, handleEnded]);
-
-  const play = useCallback(async (song?: Song): Promise<void> => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    try {
-      // Wait for any pending play promise to resolve
-      if (playPromiseRef.current) {
-        await playPromiseRef.current;
-      }
-
-      if (song) {
-        dispatch({ type: 'SET_CURRENT_SONG', payload: song });
-        dispatch({ type: 'SET_ERROR', payload: null });
-        
-        // Handle different types of audio sources
-        if (song.uploadedBy === 'community' && song.filePath.startsWith('data:audio/')) {
-          // Shared song with base64 data
-          audio.src = song.filePath;
-        } else {
-          // Try to get from IndexedDB first for local songs
-          try {
-            const cachedBlob = await db.getAudioBlob(song.id);
-            if (cachedBlob) {
-              const url = URL.createObjectURL(cachedBlob);
-              audio.src = url;
-            } else {
-              audio.src = song.filePath;
-            }
-          } catch (error) {
-            console.warn('Failed to load from cache:', error);
-            audio.src = song.filePath;
-          }
-        }
-        
-        // Add to recently played
-        try {
-          await db.addToRecentlyPlayed(song);
-        } catch (error) {
-          console.warn('Failed to add to recently played:', error);
-        }
-      }
-
-      playPromiseRef.current = audio.play();
-      await playPromiseRef.current;
-      dispatch({ type: 'SET_PLAYING', payload: true });
-    } catch (error) {
-      console.error('Error playing audio:', error);
-      dispatch({ type: 'SET_ERROR', payload: 'Failed to play audio' });
-      dispatch({ type: 'SET_PLAYING', payload: false });
-    } finally {
-      playPromiseRef.current = null;
-    }
-  }, []);
-
-  const pause = useCallback(() => {
-    const audio = audioRef.current;
-    if (audio && !audio.paused) {
-      audio.pause();
-      dispatch({ type: 'SET_PLAYING', payload: false });
-    }
-  }, []);
-
-  const togglePlay = useCallback(() => {
-    if (state.isPlaying) {
-      pause();
-    } else {
-      if (state.currentSong) {
-        play();
-      } else if (state.queue.length > 0) {
-        play(state.queue[state.currentIndex]);
+      if (state.repeat === 'all' || state.isShuffled) {
+        void nextSong();
+      } else if (state.currentIndex < state.queue.length - 1) {
+        void nextSong();
+      } else {
+        dispatch({ type: 'SET_PLAYING', payload: false });
       }
     }
-  }, [state.isPlaying, state.currentSong, state.queue, state.currentIndex, play, pause]);
+  }, [state.repeat, state.isShuffled, state.currentIndex, state.queue.length, nextSong]);
 
-  const setVolume = useCallback((volume: number) => {
-    const clampedVolume = Math.max(0, Math.min(1, volume));
-    const audio = audioRef.current;
-    if (audio) {
-      audio.volume = clampedVolume;
-      dispatch({ type: 'SET_VOLUME', payload: clampedVolume });
-    }
-  }, []);
-
-  const seek = useCallback((time: number) => {
-    const audio = audioRef.current;
-    if (audio && !isNaN(time) && time >= 0 && time <= audio.duration) {
-      audio.currentTime = time;
-      dispatch({ type: 'SET_CURRENT_TIME', payload: time });
-    }
-  }, []);
-
-  const nextSong = useCallback(() => {
-    if (state.queue.length === 0) return;
-    
-    let nextIndex = state.currentIndex + 1;
-    if (nextIndex >= state.queue.length) {
-      nextIndex = 0;
-    }
-    
-    dispatch({ type: 'SET_CURRENT_INDEX', payload: nextIndex });
-    play(state.queue[nextIndex]);
-  }, [state.queue, state.currentIndex, play]);
-
-  const prevSong = useCallback(() => {
-    if (state.queue.length === 0) return;
-    
-    let prevIndex = state.currentIndex - 1;
-    if (prevIndex < 0) {
-      prevIndex = state.queue.length - 1;
-    }
-    
-    dispatch({ type: 'SET_CURRENT_INDEX', payload: prevIndex });
-    play(state.queue[prevIndex]);
-  }, [state.queue, state.currentIndex, play]);
-
-  const addToQueue = useCallback((song: Song) => {
-    dispatch({ type: 'ADD_TO_QUEUE', payload: song });
-  }, []);
-
-  const removeFromQueue = useCallback((index: number) => {
-    if (index >= 0 && index < state.queue.length) {
-      dispatch({ type: 'REMOVE_FROM_QUEUE', payload: index });
-    }
-  }, [state.queue.length]);
-
-  const setQueue = useCallback((songs: Song[], startIndex = 0) => {
-    dispatch({ type: 'SET_QUEUE', payload: { songs, startIndex } });
-  }, []);
-
-  const toggleShuffle = useCallback(() => {
-    dispatch({ type: 'TOGGLE_SHUFFLE' });
-  }, []);
-
-  const toggleRepeat = useCallback(() => {
-    dispatch({ type: 'TOGGLE_REPEAT' });
-  }, []);
-
+  // State update functions
   const updateCurrentTime = useCallback((time: number) => {
     if (!isNaN(time) && time >= 0) {
       dispatch({ type: 'SET_CURRENT_TIME', payload: time });
@@ -377,6 +415,7 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     dispatch({ type: 'SET_SONGS', payload: songs });
   }, []);
 
+  // Audio effects functions
   const setEqualizer = useCallback((equalizer: PlaybackState['equalizer']) => {
     dispatch({ type: 'SET_EQUALIZER', payload: equalizer });
   }, []);
@@ -385,8 +424,8 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     dispatch({ type: 'SET_CROSSFADE', payload: { enabled, duration } });
   }, []);
 
+  // Song management functions
   const refreshSongs = useCallback(() => {
-    // Refresh songs to include new community uploads
     try {
       const sharedSongs = sharedDatabase.getSharedSongs();
       const localSongs = state.songs.filter(s => s.uploadedBy !== 'community');
@@ -401,7 +440,87 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     }
   }, [state.songs, setSongs]);
 
-  // Auto-refresh community songs periodically
+  const toggleLike = useCallback(async (songId: string) => {
+    const song = state.songs.find(s => s.id === songId);
+    if (!song) return;
+    
+    // Update state immediately for responsive UI
+    dispatch({ type: 'TOGGLE_LIKE', payload: songId });
+    
+    try {
+      // Update local database
+      await db.songs.update(songId, { liked: !song.liked });
+      
+      // If we have a user and Supabase is configured, update the backend
+      const authContext = window.localStorage.getItem('meow_play_auth');
+      if (authContext) {
+        const auth = JSON.parse(authContext);
+        const userId = auth?.user?.id;
+        
+        if (userId) {
+          const api = ApiService.getInstance();
+          if (!song.liked) {
+            await api.likeSong(userId, songId);
+          } else {
+            await api.unlikeSong(userId, songId);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to toggle like status:', error);
+      // Revert the state change if the operation failed
+      dispatch({ type: 'TOGGLE_LIKE', payload: songId });
+    }
+  }, [state.songs]);
+
+  const addToPlaylist = useCallback((songId: string, playlistId: string) => {
+    // Implementation would go here, using the db helper
+    console.log('Adding song to playlist:', songId, playlistId);
+  }, []);
+
+  // Setup effects
+  useEffect(() => {
+    playerManagerRef.current = new PlayerManager();
+    cacheManagerRef.current = new CacheManager();
+    return () => {
+      playerManagerRef.current?.cleanup();
+      playerManagerRef.current = null;
+      cacheManagerRef.current?.destroy();
+      cacheManagerRef.current = null;
+    };
+  }, []);
+
+  // Volume effect
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (audio) {
+      audio.volume = state.volume;
+    }
+  }, [state.volume]);
+
+  // Audio event binding effect
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    audio.addEventListener('timeupdate', handleTimeUpdate);
+    audio.addEventListener('durationchange', handleDurationChange);
+    audio.addEventListener('loadstart', handleLoadStart);
+    audio.addEventListener('canplay', handleCanPlay);
+    audio.addEventListener('error', handleError);
+    audio.addEventListener('ended', handleEnded);
+
+    return () => {
+      audio.removeEventListener('timeupdate', handleTimeUpdate);
+      audio.removeEventListener('durationchange', handleDurationChange);
+      audio.removeEventListener('loadstart', handleLoadStart);
+      audio.removeEventListener('canplay', handleCanPlay);
+      audio.removeEventListener('error', handleError);
+      audio.removeEventListener('ended', handleEnded);
+    };
+  }, [handleTimeUpdate, handleDurationChange, handleLoadStart, handleCanPlay, handleError, handleEnded]);
+
+  // Auto-refresh community songs effect
   useEffect(() => {
     const interval = setInterval(() => {
       refreshSongs();
@@ -428,13 +547,13 @@ export const MusicProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       toggleRepeat,
       updateCurrentTime,
       updateDuration,
-      songs: state.songs,
       setSongs,
-      loading: state.loading,
-      error: state.error,
       setEqualizer,
       setCrossfade,
-      refreshSongs
+      refreshSongs,
+      toggleLike,
+      addToPlaylist,
+      isRepeating: state.repeat !== 'none'
     }}>
       {children}
       <audio ref={audioRef} preload="metadata" />

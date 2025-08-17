@@ -5,6 +5,52 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Meow-Play - Your Purr-fect Music Streaming Experience</title>
+    
+    <!-- Google Analytics 4 -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=%VITE_GOOGLE_ANALYTICS_ID%"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', '%VITE_GOOGLE_ANALYTICS_ID%', {
+        page_title: 'Meow-Play Music Streaming',
+        custom_map: {'custom_parameter_1': 'user_type'}
+      });
+    </script>
+    
+    <!-- Error Tracking -->
+    <script>
+      window.addEventListener('error', (event) => {
+        fetch('/api/log-error', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            message: event.message,
+            filename: event.filename,
+            lineno: event.lineno,
+            colno: event.colno,
+            stack: event.error?.stack,
+            timestamp: new Date().toISOString(),
+            userAgent: navigator.userAgent,
+            url: window.location.href
+          })
+        }).catch(console.warn);
+      });
+      
+      window.addEventListener('unhandledrejection', (event) => {
+        fetch('/api/log-error', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            message: 'Unhandled Promise Rejection: ' + event.reason,
+            type: 'promise_rejection',
+            timestamp: new Date().toISOString(),
+            userAgent: navigator.userAgent,
+            url: window.location.href
+          })
+        }).catch(console.warn);
+      });
+    </script>
   </head>
   <body>
     <div id="root"></div>

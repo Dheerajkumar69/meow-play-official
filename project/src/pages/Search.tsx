@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { Search as SearchIcon, Filter } from 'lucide-react';
+import { Search as SearchIcon, Filter, Settings } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import SongCard from '../components/SongCard';
 import { useMusic } from '../contexts/MusicContext';
 import { useDebounce } from '../hooks/useDebounce';
@@ -67,6 +68,13 @@ const Search: React.FC = () => {
           />
         </div>
         <div className="flex items-center space-x-2">
+          <Link
+            to="/search/advanced"
+            className="flex items-center space-x-2 px-4 py-3 bg-purple-500/20 text-purple-400 rounded-lg hover:bg-purple-500/30 transition-colors"
+          >
+            <Settings className="w-4 h-4" />
+            <span>Advanced</span>
+          </Link>
           <Filter className="w-5 h-5 text-gray-400" />
           <select
             value={filterGenre}

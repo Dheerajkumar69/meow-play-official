@@ -2,6 +2,8 @@
 import { Song } from '../types';
 import { audioMetadataExtractor } from './audioMetadata';
 import { v4 as uuidv4 } from 'uuid';
+import { errorService } from '../services/ErrorService';
+import { withDatabaseRetry } from './retry';
 
 export interface SharedSong extends Song {
   uploadedBy: string;
@@ -31,8 +33,7 @@ class SharedDatabaseManager {
     file: File, 
     userId: string, 
     username: string,
-    customMetadata?: Partial<Song>,
-    posterFile?: File
+    customMetadata?: Partial<Song>
   ): Promise<SharedSong> {
     try {
       // Extract metadata automatically
@@ -40,12 +41,6 @@ class SharedDatabaseManager {
       
       // Convert file to base64 for storage (in production, use proper file storage)
       const audioBase64 = await this.fileToBase64(file);
-      
-      // Process poster file if provided
-      let posterBase64 = null;
-      if (posterFile) {
-        posterBase64 = await audioMetadataExtractor.processPosterImage(posterFile);
-      }
       
       // Create shared song object
       const sharedSong: SharedSong = {
@@ -56,7 +51,7 @@ class SharedDatabaseManager {
         genre: customMetadata?.genre || metadata.genre,
         duration: metadata.duration || 180,
         filePath: audioBase64,
-        coverArt: posterBase64 || metadata.coverArt || customMetadata?.coverArt || '/assets/default-cover.svg',
+        coverArt: metadata.coverArt || customMetadata?.coverArt,
         uploadedBy: userId,
         uploaderUsername: username,
         isShared: true,
@@ -78,11 +73,11 @@ class SharedDatabaseManager {
       await this.saveSharedSong(sharedSong);
       
       // Track user upload
-      this.trackUserUpload(userId, sharedSong.id);
+      await this.trackUserUpload(userId, sharedSong.id);
       
       return sharedSong;
     } catch (error) {
-      console.error('Failed to upload to shared database:', error);
+      await errorService.logDatabaseError(error as Error, 'upload', 'shared_songs');
       throw new Error('Failed to upload song to shared database');
     }
   }
@@ -101,7 +96,7 @@ class SharedDatabaseManager {
   }
 
   // Convert base64 back to blob URL for playback
-  createPlayableUrl(base64Data: string): string {
+  async createPlayableUrl(base64Data: string): Promise<string> {
     try {
       // If it's already a base64 data URL, return as is for audio element
       if (base64Data.startsWith('data:audio/')) {
@@ -116,12 +111,12 @@ class SharedDatabaseManager {
       // Otherwise, assume it's base64 and create data URL
       return `data:audio/mpeg;base64,${base64Data}`;
     } catch (error) {
-      console.error('Failed to create playable URL:', error);
+      await errorService.log(error as Error, { context: { operation: 'createPlayableUrl' } });
       return base64Data;
     }
   }
   // Get all shared songs
-  getSharedSongs(): SharedSong[] {
+  async getSharedSongs(): Promise<SharedSong[]> {
     try {
       const stored = localStorage.getItem(this.sharedSongsKey);
       if (!stored) return [];
@@ -133,19 +128,19 @@ class SharedDatabaseManager {
         createdAt: new Date(song.createdAt)
       })).filter((song: SharedSong) => song.status === 'active');
     } catch (error) {
-      console.error('Failed to get shared songs:', error);
+      await errorService.logDatabaseError(error as Error, 'get', 'shared_songs');
       return [];
     }
   }
 
   // Get songs by user
-  getUserUploads(userId: string): SharedSong[] {
-    const allSongs = this.getAllSharedSongs(); // Include all statuses for user's own uploads
+  async getUserUploads(userId: string): Promise<SharedSong[]> {
+    const allSongs = await this.getAllSharedSongs(); // Include all statuses for user's own uploads
     return allSongs.filter(song => song.uploadedBy === userId);
   }
 
   // Get all songs (admin only)
-  getAllSharedSongs(): SharedSong[] {
+  async getAllSharedSongs(): Promise<SharedSong[]> {
     try {
       const stored = localStorage.getItem(this.sharedSongsKey);
       if (!stored) return [];
@@ -157,7 +152,7 @@ class SharedDatabaseManager {
         createdAt: new Date(song.createdAt)
       }));
     } catch (error) {
-      console.error('Failed to get all shared songs:', error);
+      await errorService.logDatabaseError(error as Error, 'getAll', 'shared_songs');
       return [];
     }
   }
@@ -180,43 +175,15 @@ class SharedDatabaseManager {
       // Save updated songs
       await this.saveAllSharedSongs(songs);
       
-      console.log(`Song "${song.title}" removed by admin ${adminUserId}`);
+      // Log successful admin action
+      errorService.log(new Error(`Song "${song.title}" removed by admin ${adminUserId}`), {
+        severity: 'low',
+        tags: ['admin'],
+        context: { operation: 'delete', songId, adminUserId }
+      });
     } catch (error) {
-      console.error('Failed to delete song:', error);
+      await errorService.logDatabaseError(error as Error, 'delete', 'shared_songs');
       throw new Error('Failed to delete song');
-    }
-  }
-  
-  // Bulk delete songs (admin only)
-  async bulkDeleteSongs(songIds: string[], adminUserId: string): Promise<{success: number, failed: number}> {
-    try {
-      const songs = this.getAllSharedSongs();
-      let successCount = 0;
-      let failedCount = 0;
-      
-      // Process each song ID
-      for (const songId of songIds) {
-        const songIndex = songs.findIndex(song => song.id === songId);
-        
-        if (songIndex !== -1) {
-          // Mark as removed instead of deleting completely
-          songs[songIndex].status = 'removed';
-          successCount++;
-          console.log(`Song "${songs[songIndex].title}" removed by admin ${adminUserId}`);
-        } else {
-          failedCount++;
-        }
-      }
-      
-      // Save all changes at once
-      if (successCount > 0) {
-        await this.saveAllSharedSongs(songs);
-      }
-      
-      return { success: successCount, failed: failedCount };
-    } catch (error) {
-      console.error('Failed to bulk delete songs:', error);
-      throw new Error('Failed to bulk delete songs');
     }
   }
 
@@ -232,7 +199,7 @@ class SharedDatabaseManager {
         await this.saveAllSharedSongs(songs);
       }
     } catch (error) {
-      console.error('Failed to toggle like:', error);
+      await errorService.logDatabaseError(error as Error, 'toggleLike', 'shared_songs');
     }
   }
 
@@ -247,13 +214,13 @@ class SharedDatabaseManager {
         await this.saveAllSharedSongs(songs);
       }
     } catch (error) {
-      console.error('Failed to increment download count:', error);
+      await errorService.logDatabaseError(error as Error, 'incrementDownloadCount', 'shared_songs');
     }
   }
 
   // Search shared songs
-  searchSharedSongs(query: string): SharedSong[] {
-    const songs = this.getSharedSongs();
+  async searchSharedSongs(query: string): Promise<SharedSong[]> {
+    const songs = await this.getSharedSongs();
     const searchTerm = query.toLowerCase();
     
     return songs.filter(song =>
@@ -266,8 +233,8 @@ class SharedDatabaseManager {
   }
 
   // Get trending songs
-  getTrendingSongs(limit: number = 20): SharedSong[] {
-    const songs = this.getSharedSongs();
+  async getTrendingSongs(limit: number = 20): Promise<SharedSong[]> {
+    const songs = await this.getSharedSongs();
     
     // Sort by a combination of likes, downloads, and recency
     return songs.sort((a, b) => {
@@ -278,8 +245,8 @@ class SharedDatabaseManager {
   }
 
   // Get recent uploads
-  getRecentUploads(limit: number = 20): SharedSong[] {
-    const songs = this.getSharedSongs();
+  async getRecentUploads(limit: number = 20): Promise<SharedSong[]> {
+    const songs = await this.getSharedSongs();
     return songs
       .sort((a, b) => b.uploadedAt.getTime() - a.uploadedAt.getTime())
       .slice(0, limit);
@@ -296,14 +263,14 @@ class SharedDatabaseManager {
     try {
       localStorage.setItem(this.sharedSongsKey, JSON.stringify(songs));
     } catch (error) {
-      console.error('Failed to save shared songs:', error);
+      await errorService.logDatabaseError(error as Error, 'save', 'shared_songs');
       throw new Error('Failed to save to database');
     }
   }
 
-  private trackUserUpload(userId: string, songId: string): void {
+  private async trackUserUpload(userId: string, songId: string): Promise<void> {
     try {
-      const uploads = this.getUserUploadHistory(userId);
+      const uploads = await this.getUserUploadHistory(userId);
       uploads.push({
         songId,
         uploadedAt: new Date()
@@ -311,11 +278,11 @@ class SharedDatabaseManager {
       
       localStorage.setItem(`${this.userUploadsKey}_${userId}`, JSON.stringify(uploads));
     } catch (error) {
-      console.error('Failed to track user upload:', error);
+      await errorService.logDatabaseError(error as Error, 'trackUserUpload', 'user_uploads');
     }
   }
 
-  private getUserUploadHistory(userId: string): Array<{ songId: string; uploadedAt: Date }> {
+  private async getUserUploadHistory(userId: string): Promise<Array<{ songId: string; uploadedAt: Date }>> {
     try {
       const stored = localStorage.getItem(`${this.userUploadsKey}_${userId}`);
       if (!stored) return [];
@@ -326,20 +293,20 @@ class SharedDatabaseManager {
         uploadedAt: new Date(upload.uploadedAt)
       }));
     } catch (error) {
-      console.error('Failed to get user upload history:', error);
+      await errorService.logDatabaseError(error as Error, 'getUserUploadHistory', 'user_uploads');
       return [];
     }
   }
 
   // Get database statistics
-  getDatabaseStats(): {
+  async getDatabaseStats(): Promise<{
     totalSongs: number;
     totalUploaders: number;
     totalDownloads: number;
     totalLikes: number;
     recentUploads: number;
-  } {
-    const songs = this.getSharedSongs();
+  }> {
+    const songs = await this.getSharedSongs();
     const uploaders = new Set(songs.map(song => song.uploadedBy));
     const recentUploads = songs.filter(song => {
       const daysSinceUpload = (Date.now() - song.uploadedAt.getTime()) / (1000 * 60 * 60 * 24);

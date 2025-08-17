@@ -49,6 +49,8 @@ export interface Comment {
   replies?: Comment[];
 }
 
+export type Repeat = 'none' | 'one' | 'all';
+
 export interface Activity {
   id: string;
   userId: string;
@@ -97,7 +99,7 @@ export interface PlaybackState {
   queue: Song[];
   currentIndex: number;
   isShuffled: boolean;
-  isRepeating: boolean;
+  repeat: Repeat;
   crossfadeEnabled: boolean;
   crossfadeDuration: number;
   equalizer: {

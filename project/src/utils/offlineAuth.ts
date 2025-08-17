@@ -16,14 +16,13 @@ const OFFLINE_USERS_KEY = 'music_app_offline_users';
 const CURRENT_USER_KEY = 'music_app_current_user';
 const SYNC_STATUS_KEY = 'music_app_sync_status';
 
-// Master Admin Account - DO NOT CHANGE THESE CREDENTIALS
-export const MASTER_ADMIN = {
-  email: 'admin@streamify.com',
-  password: 'StreamifyAdmin2024!',
-  username: 'StreamifyAdmin',
-  id: 'master-admin-001',
+// Admin configuration from environment variables
+const getAdminConfig = () => ({
+  email: import.meta.env['VITE_ADMIN_EMAIL'] || 'admin@meowplay.com',
+  username: 'MeowPlayAdmin',
+  id: 'admin-001',
   isAdmin: true
-};
+});
 
 export class OfflineAuthManager {
   private static instance: OfflineAuthManager;
@@ -54,16 +53,16 @@ export class OfflineAuthManager {
 
   private async initializeMasterAdmin(): Promise<void> {
     const users = this.getOfflineUsers();
-    const adminExists = users.some(user => user.email === MASTER_ADMIN.email);
+    const adminConfig = getAdminConfig();
+    const adminExists = users.some(user => user.email === adminConfig.email);
     
     if (!adminExists) {
-      const passwordHash = await bcrypt.hash(MASTER_ADMIN.password, 10);
-      
+      // Admin user will be created through Supabase dashboard
+      // This is just a placeholder for offline mode
       const adminUser: OfflineUser = {
-        id: MASTER_ADMIN.id,
-        email: MASTER_ADMIN.email,
-        username: MASTER_ADMIN.username,
-        passwordHash,
+        id: adminConfig.id,
+        email: adminConfig.email,
+        username: adminConfig.username,
         createdAt: new Date(),
         isAdmin: true,
         needsSync: false,
@@ -162,7 +161,7 @@ export class OfflineAuthManager {
         passwordHash,
         createdAt: new Date(),
         needsSync: true,
-        lastSyncedAt: undefined
+        lastSyncedAt: new Date()
       };
 
       users.push(newUser);
@@ -197,15 +196,8 @@ export class OfflineAuthManager {
       throw new Error('Invalid credentials');
     }
 
-    // Handle master admin login with plain text password
-    if (user.email === MASTER_ADMIN.email && password === MASTER_ADMIN.password) {
-      this.setCurrentUser(user);
-      const token = this.generateLocalToken(user);
-      return { 
-        user: this.sanitizeUser(user), 
-        token 
-      };
-    }
+    // Admin users should be authenticated through Supabase only
+    // No plain text password authentication in production
 
     if (!user.passwordHash) {
       throw new Error('Invalid credentials');
@@ -272,7 +264,8 @@ export class OfflineAuthManager {
     
     try {
       const users = this.getOfflineUsers();
-      const usersNeedingSync = users.filter(u => u.needsSync && u.email !== MASTER_ADMIN.email);
+      const adminConfig = getAdminConfig();
+      const usersNeedingSync = users.filter(u => u.needsSync && u.email !== adminConfig.email);
 
       for (const user of usersNeedingSync) {
         try {
@@ -362,8 +355,8 @@ export class OfflineAuthManager {
     }
     return this.getOfflineUsers().map(user => ({
       ...user,
-      // For display purposes in admin panel, show original password for master admin
-      password: user.id === MASTER_ADMIN.id ? MASTER_ADMIN.password : undefined
+      // Admin passwords are managed through Supabase
+      password: undefined
     }));
   }
 
@@ -373,7 +366,8 @@ export class OfflineAuthManager {
       throw new Error('Admin access required');
     }
 
-    if (userId === MASTER_ADMIN.id) {
+    const adminConfig = getAdminConfig();
+    if (userId === adminConfig.id) {
       throw new Error('Cannot delete master admin account');
     }
 

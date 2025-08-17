@@ -1,10 +1,133 @@
 import { Song, Playlist } from '../types';
 
+interface DBCollection<T> {
+  get(id: string): Promise<T | undefined>;
+  getAll(): Promise<T[]>;
+  add(item: T): Promise<string>;
+  update(id: string, changes: Partial<T>): Promise<void>;
+  delete(id: string): Promise<void>;
+  put(item: T): Promise<void>;
+  clear(): Promise<void>;
+  toArray(): Promise<T[]>;
+  count(): Promise<number>;
+}
+
 class IndexedDBManager {
   private dbName = 'MusicStreamingDB';
   private version = 1;
   private db: IDBDatabase | null = null;
   private initPromise: Promise<void> | null = null;
+
+  public songs: DBCollection<Song>;
+  public playlists: DBCollection<Playlist>;
+
+  constructor() {
+    this.songs = this.createCollection<Song>('songs');
+    this.playlists = this.createCollection<Playlist>('playlists');
+  }
+
+  private createCollection<T>(storeName: string): DBCollection<T> {
+    const manager = this;
+    
+    return {
+      async get(id: string): Promise<T | undefined> {
+        await manager.init();
+        const store = manager.getObjectStore(storeName, 'readonly');
+        return new Promise((resolve, reject) => {
+          const request = store.get(id);
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+      },
+
+      async getAll(): Promise<T[]> {
+        await manager.init();
+        const store = manager.getObjectStore(storeName, 'readonly');
+        return new Promise((resolve, reject) => {
+          const request = store.getAll();
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+      },
+
+      async add(item: T): Promise<string> {
+        await manager.init();
+        const store = manager.getObjectStore(storeName, 'readwrite');
+        return new Promise((resolve, reject) => {
+          const request = store.add(item);
+          request.onsuccess = () => resolve(request.result as string);
+          request.onerror = () => reject(request.error);
+        });
+      },
+
+      async update(id: string, changes: Partial<T>): Promise<void> {
+        await manager.init();
+        const store = manager.getObjectStore(storeName, 'readwrite');
+        return new Promise((resolve, reject) => {
+          const getRequest = store.get(id);
+          getRequest.onsuccess = () => {
+            const item = { ...getRequest.result, ...changes };
+            const updateRequest = store.put(item);
+            updateRequest.onsuccess = () => resolve();
+            updateRequest.onerror = () => reject(updateRequest.error);
+          };
+          getRequest.onerror = () => reject(getRequest.error);
+        });
+      },
+
+      async delete(id: string): Promise<void> {
+        await manager.init();
+        const store = manager.getObjectStore(storeName, 'readwrite');
+        return new Promise((resolve, reject) => {
+          const request = store.delete(id);
+          request.onsuccess = () => resolve();
+          request.onerror = () => reject(request.error);
+        });
+      },
+
+      async put(item: T): Promise<void> {
+        await manager.init();
+        const store = manager.getObjectStore(storeName, 'readwrite');
+        return new Promise((resolve, reject) => {
+          const request = store.put(item);
+          request.onsuccess = () => resolve();
+          request.onerror = () => reject(request.error);
+        });
+      },
+
+      async clear(): Promise<void> {
+        await manager.init();
+        const store = manager.getObjectStore(storeName, 'readwrite');
+        return new Promise((resolve, reject) => {
+          const request = store.clear();
+          request.onsuccess = () => resolve();
+          request.onerror = () => reject(request.error);
+        });
+      },
+
+      async toArray(): Promise<T[]> {
+        return this.getAll();
+      },
+
+      async count(): Promise<number> {
+        await manager.init();
+        const store = manager.getObjectStore(storeName, 'readonly');
+        return new Promise((resolve, reject) => {
+          const request = store.count();
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+      }
+    };
+  }
+
+  private getObjectStore(storeName: string, mode: IDBTransactionMode): IDBObjectStore {
+    if (!this.db) {
+      throw new Error('Database not initialized');
+    }
+    const transaction = this.db.transaction(storeName, mode);
+    return transaction.objectStore(storeName);
+  }
 
   async init(): Promise<void> {
     if (this.initPromise) {

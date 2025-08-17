@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Download, Play, Filter, Globe, Heart, Info, RefreshCw, Music, Database, Users, TrendingUp } from 'lucide-react';
+import { Search, Download, Play, Globe, Heart, RefreshCw, Music, Database, Users, TrendingUp } from 'lucide-react';
 import { musicSourceManager, ExternalSong } from '../utils/musicSources';
 import { sharedDatabase, SharedSong } from '../utils/sharedDatabase';
 import { useMusic } from '../contexts/MusicContext';
@@ -11,7 +11,7 @@ const Discover: React.FC = () => {
   const [results, setResults] = useState<ExternalSong[]>([]);
   const [sharedResults, setSharedResults] = useState<SharedSong[]>([]);
   const [loading, setLoading] = useState(false);
-  const [selectedSource, setSelectedSource] = useState('all');
+  const [selectedSource] = useState('all');
   const [popularSongs, setPopularSongs] = useState<ExternalSong[]>([]);
   const [trendingShared, setTrendingShared] = useState<SharedSong[]>([]);
   const [recentUploads, setRecentUploads] = useState<SharedSong[]>([]);

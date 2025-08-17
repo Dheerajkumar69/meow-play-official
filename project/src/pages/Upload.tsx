@@ -1,11 +1,12 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Upload as UploadIcon, X, Music, CheckCircle, AlertCircle, FileAudio, Sparkles, Share, Database, Cloud, HardDrive } from 'lucide-react';
+import { Upload as UploadIcon, X, Music, CheckCircle, AlertCircle, FileAudio, Sparkles, Share, Database } from 'lucide-react';
 import { useMusic } from '../contexts/MusicContext';
 import { useAuth } from '../contexts/AuthContext';
 import { audioMetadataExtractor, AudioMetadata } from '../utils/audioMetadata';
 import { sharedDatabase } from '../utils/sharedDatabase';
-import { songsAPI } from '../utils/api';
+import { songStorage } from '../utils/songStorage';
 import { v4 as uuidv4 } from 'uuid';
+import type { Song } from '../types';
 
 interface UploadProgress {
   progress: number;
@@ -18,12 +19,9 @@ interface FileWithMetadata {
   metadata: AudioMetadata;
   id: string;
   shareToDatabase: boolean;
-  uploadToServer: boolean;
-  posterFile?: File;
-  posterPreview?: string;
 }
 
-const Upload: React.FC = () => {
+const Upload: React.FC = (): JSX.Element => {
   const [dragActive, setDragActive] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<FileWithMetadata[]>([]);
   const [uploadProgress, setUploadProgress] = useState<UploadProgress>({ progress: 0, status: 'idle' });
@@ -77,8 +75,7 @@ const Upload: React.FC = () => {
           file,
           metadata,
           id: uuidv4(),
-          shareToDatabase: true, // Default to sharing locally
-          uploadToServer: true // Default to uploading to server
+          shareToDatabase: true // Default to sharing
         });
       } catch (error) {
         console.error(`Failed to process ${file.name}:`, error);
@@ -90,8 +87,7 @@ const Upload: React.FC = () => {
             artist: 'Unknown Artist'
           },
           id: uuidv4(),
-          shareToDatabase: true,
-          uploadToServer: true
+          shareToDatabase: true
         });
       }
     }
@@ -139,42 +135,10 @@ const Upload: React.FC = () => {
     ));
   }, []);
 
-  const handlePosterUpload = useCallback(async (fileId: string, posterFile: File) => {
-    try {
-      // Process the poster image
-      const posterPreview = await audioMetadataExtractor.processPosterImage(posterFile);
-      
-      // Update the file metadata with the poster
-      setSelectedFiles(prev => prev.map(item => 
-        item.id === fileId 
-          ? { 
-              ...item, 
-              posterFile, 
-              posterPreview,
-              metadata: { 
-                ...item.metadata, 
-                coverArt: posterPreview 
-              } 
-            }
-          : item
-      ));
-    } catch (error) {
-      console.error('Failed to process poster image:', error);
-    }
-  }, []);
-
   const toggleShareToDatabase = useCallback((fileId: string) => {
     setSelectedFiles(prev => prev.map(item => 
       item.id === fileId 
         ? { ...item, shareToDatabase: !item.shareToDatabase }
-        : item
-    ));
-  }, []);
-  
-  const toggleUploadToServer = useCallback((fileId: string) => {
-    setSelectedFiles(prev => prev.map(item => 
-      item.id === fileId 
-        ? { ...item, uploadToServer: !item.uploadToServer }
         : item
     ));
   }, []);
@@ -188,24 +152,9 @@ const Upload: React.FC = () => {
     });
   }, []);
 
-  const simulateUploadProgress = useCallback((): Promise<void> => {
-    return new Promise((resolve) => {
-      let progress = 0;
-      const interval = setInterval(() => {
-        progress += Math.random() * 15;
-        if (progress >= 100) {
-          progress = 100;
-          setUploadProgress({ progress, status: 'success' });
-          clearInterval(interval);
-          resolve();
-        } else {
-          setUploadProgress({ progress, status: 'uploading' });
-        }
-      }, 200);
-    });
-  }, []);
+  // Upload progress is now handled directly in the upload process
 
-  const handleSubmit = useCallback(async (e: React.FormEvent) => {
+  const handleSubmit = useCallback(async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     
     if (selectedFiles.length === 0) {
@@ -217,85 +166,77 @@ const Upload: React.FC = () => {
       return;
     }
 
+    if (!user) {
+      setUploadProgress({
+        status: 'error',
+        progress: 0,
+        message: 'Please log in to upload songs'
+      });
+      return;
+    }
+
     setUploadProgress({ progress: 0, status: 'uploading' });
 
     try {
-      // Simulate upload process with progress
-      await simulateUploadProgress();
-
-      // Process each file
+      const totalFiles = selectedFiles.length;
+      let completedFiles = 0;
       const newSongs = [];
       const sharedSongs = [];
-      const serverSongs = [];
 
-      for (const { file, metadata, shareToDatabase, uploadToServer, posterFile } of selectedFiles) {
-        // Create local song with blob URL for immediate playback
-        const localBlobUrl = URL.createObjectURL(file);
-        
-        const localSong = {
-          id: uuidv4(),
+      for (const { file, metadata, shareToDatabase: shouldShare } of selectedFiles) {
+        // Upload to storage system
+        const songMetadata = await songStorage.storeSong(file, {
           title: metadata.title || file.name.replace(/\.[^/.]+$/, ''),
           artist: metadata.artist || 'Unknown Artist',
+          uploadedBy: user.id,
+          uploaderUsername: user.username
+        });
+
+        // Update progress
+        completedFiles++;
+        setUploadProgress(prev => ({
+          ...prev,
+          progress: (completedFiles / totalFiles) * 100,
+          message: `Uploaded ${completedFiles} of ${totalFiles} files...`
+        }));
+
+        // Create song object for local state
+        const song = {
+          id: songMetadata.id,
+          title: songMetadata.title,
+          artist: songMetadata.artist,
           album: metadata.album,
           genre: metadata.genre,
-          duration: metadata.duration || 180,
-          filePath: localBlobUrl,
-          coverArt: metadata.coverArt || '/assets/default-cover.svg',
-          uploadedBy: user?.id || '1',
+          filePath: songMetadata.filePath,
+          coverArt: metadata.coverArt,
+          uploadedBy: songMetadata.uploadedBy,
           createdAt: new Date(),
+          duration: metadata.duration || 0,
           playCount: 0,
-          year: metadata.year
+          year: metadata.year,
         };
 
-        newSongs.push(localSong);
+        newSongs.push(song);
 
-        // Share to local database if enabled
-        if (shareToDatabase && user) {
-          try {
-            const sharedSong = await sharedDatabase.uploadToSharedDatabase(
-              file,
-              user.id,
-              user.username,
-              {
-                title: metadata.title,
-                artist: metadata.artist,
-                album: metadata.album,
-                genre: metadata.genre,
-                coverArt: metadata.coverArt || '/assets/default-cover.svg',
-                year: metadata.year
-              },
-              posterFile // Pass the poster file to the upload function
-            );
-            sharedSongs.push(sharedSong);
-          } catch (error) {
-            console.error('Failed to share song to local database:', error);
-          }
-        }
-        
-        // Upload to server if enabled
-        if (uploadToServer && user) {
-          try {
-            const songData = {
-              title: metadata.title || file.name.replace(/\.[^/.]+$/, ''),
-              artist: metadata.artist || 'Unknown Artist',
+        // Handle shared database if requested
+        if (shouldShare) {
+          const sharedSong = await sharedDatabase.uploadToSharedDatabase(
+            file,
+            user.id,
+            user.username,
+            {
+              title: metadata.title,
+              artist: metadata.artist,
               album: metadata.album,
               genre: metadata.genre,
-              duration: metadata.duration || 180,
-              year: metadata.year,
-              mood: metadata.mood
-            };
-            
-            const serverSong = await songsAPI.uploadSong(file, songData, posterFile);
-            serverSongs.push(serverSong);
-          } catch (error) {
-            console.error('Failed to upload song to server:', error);
-            // Show error in UI
-            setUploadProgress(prev => ({
-              ...prev,
-              message: `${prev.message || ''} Error uploading to server: ${error.message || 'Unknown error'}`
-            }));
-          }
+              coverArt: metadata.coverArt,
+              year: metadata.year
+            }
+          );
+          sharedSongs.push(sharedSong);
         }
+
+        // This block is now handled in the previous code section
       }
 
       // Create new song objects (keeping original logic)
@@ -326,7 +267,7 @@ const Upload: React.FC = () => {
       setUploadProgress({ 
         progress: 100, 
         status: 'success', 
-        message: `Successfully uploaded ${newSongs.length} song${newSongs.length > 1 ? 's' : ''}! ${sharedSongs.length > 0 ? `${sharedSongs.length} shared locally! ` : ''}${serverSongs.length > 0 ? `${serverSongs.length} uploaded to server! 🐱` : '🐱'}` 
+        message: `Successfully uploaded ${newSongs.length} song${newSongs.length > 1 ? 's' : ''}! ${sharedSongs.length > 0 ? `${sharedSongs.length} shared to community! 🐱` : '🐱'}` 
       });
 
       // Reset status after 3 seconds
@@ -341,7 +282,7 @@ const Upload: React.FC = () => {
         message: 'Upload failed. Please try again.' 
       });
     }
-  }, [selectedFiles, simulateUploadProgress, setSongs, songs]);
+  }, [selectedFiles, songs, setSongs, user]);
 
   return (
     <div className="p-4 sm:p-8 max-w-6xl mx-auto space-y-6 sm:space-y-8">
@@ -568,61 +509,16 @@ const Upload: React.FC = () => {
                         <option value="Other" className="bg-gray-800 text-white">Other</option>
                       </select>
                     </div>
-                    
-                    {/* Poster Image Upload */}
-                    <div className="col-span-1 md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-300 mb-2">
-                        Cover Image (Optional)
-                      </label>
-                      <div className="flex items-start space-x-4">
-                        <div className="w-24 h-24 bg-white/10 border border-white/20 rounded-lg overflow-hidden flex items-center justify-center">
-                          {fileItem.posterPreview ? (
-                            <img 
-                              src={fileItem.posterPreview} 
-                              alt="Cover preview" 
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <div className="w-full h-full bg-gradient-to-br from-purple-500/50 to-pink-500/50 flex items-center justify-center">
-                              <Music className="w-8 h-8 text-white/70" />
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex-1">
-                          <input
-                            type="file"
-                            accept="image/*,.jpg,.jpeg,.png,.gif,.webp"
-                            onChange={(e) => {
-                              if (e.target.files && e.target.files[0]) {
-                                handlePosterUpload(fileItem.id, e.target.files[0]);
-                              }
-                            }}
-                            className="hidden"
-                            id={`poster-upload-${fileItem.id}`}
-                          />
-                          <label 
-                            htmlFor={`poster-upload-${fileItem.id}`}
-                            className="inline-flex items-center px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/20 rounded-lg text-white text-sm font-medium cursor-pointer transition-colors"
-                          >
-                            <Upload className="w-4 h-4 mr-2" />
-                            {fileItem.posterFile ? 'Change Cover Image' : 'Upload Cover Image'}
-                          </label>
-                          <p className="text-gray-400 text-xs mt-2">
-                            Upload a custom cover image for your song. Recommended size: 500x500px.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
                   </div>
 
                   {/* Share to Database Option */}
                   <div className="mt-4 p-4 bg-gradient-to-r from-purple-500/20 to-pink-500/20 border border-purple-500/30 rounded-lg">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-3">
-                        <HardDrive className="w-5 h-5 text-purple-400" />
+                        <Database className="w-5 h-5 text-purple-400" />
                         <div>
-                          <h4 className="text-white font-medium">Share to Local Database</h4>
-                          <p className="text-gray-400 text-sm">Store this song in your local device database</p>
+                          <h4 className="text-white font-medium">Share to Community Database</h4>
+                          <p className="text-gray-400 text-sm">Let other users discover and enjoy this song</p>
                         </div>
                       </div>
                       <button
@@ -644,43 +540,7 @@ const Upload: React.FC = () => {
                         <div className="flex items-center space-x-2">
                           <Share className="w-4 h-4 text-green-400" />
                           <span className="text-green-300 text-sm">
-                            This song will be stored in your local device database
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  
-                  {/* Upload to Server Option */}
-                  <div className="mt-4 p-4 bg-gradient-to-r from-blue-500/20 to-cyan-500/20 border border-blue-500/30 rounded-lg">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-3">
-                        <Cloud className="w-5 h-5 text-blue-400" />
-                        <div>
-                          <h4 className="text-white font-medium">Upload to Server</h4>
-                          <p className="text-gray-400 text-sm">Store this song on the server for cross-device access</p>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => toggleUploadToServer(fileItem.id)}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                          fileItem.uploadToServer ? 'bg-blue-500' : 'bg-gray-600'
-                        }`}
-                      >
-                        <span
-                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                            fileItem.uploadToServer ? 'translate-x-6' : 'translate-x-1'
-                          }`}
-                        />
-                      </button>
-                    </div>
-                    {fileItem.uploadToServer && (
-                      <div className="mt-3 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
-                        <div className="flex items-center space-x-2">
-                          <Cloud className="w-4 h-4 text-blue-400" />
-                          <span className="text-blue-300 text-sm">
-                            This song will be uploaded to the server for access across all your devices
+                            This song will be shared to the community database with auto-detected metadata
                           </span>
                         </div>
                       </div>

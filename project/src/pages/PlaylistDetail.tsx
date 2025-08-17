@@ -10,7 +10,7 @@ import { Playlist } from '../types';
 const PlaylistDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { songs, setQueue, play } = useMusic();
+  const { songs, setQueue, play, toggleLike } = useMusic();
   const [playlist, setPlaylist] = useState<Playlist | null>(null);
   const [isLiked, setIsLiked] = useState(false);
 
@@ -67,9 +67,10 @@ const PlaylistDetail: React.FC = () => {
     }
   };
 
-  const toggleLike = () => {
+  const handleLikePlaylist = () => {
     setIsLiked(!isLiked);
-    // TODO: Implement actual like functionality
+    // TODO: Implement playlist like functionality in a future update
+    // This would be different from liking individual songs
   };
 
   if (!playlist) {
@@ -163,7 +164,7 @@ const PlaylistDetail: React.FC = () => {
           </button>
 
           <button
-            onClick={toggleLike}
+            onClick={handleLikePlaylist}
             className={`w-12 h-12 transition-colors ${
               isLiked ? 'text-green-400' : 'text-gray-400 hover:text-white'
             }`}

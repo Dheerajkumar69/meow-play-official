@@ -1,0 +1,214 @@
+import { AudioEventManager } from '../utils/audioEventManager';
+
+interface AudioHandlers {
+  onTimeUpdate: () => void;
+  onDurationChange: () => void;
+  onEnded: () => void;
+  onError: (event: Event) => void;
+  onCanPlay: () => void;
+  onLoadStart: () => void;
+  onStalled?: () => void;
+  onSuspend?: () => void;
+  onWaiting?: () => void;
+}
+
+export class PlayerManager {
+  private audioManager: AudioEventManager;
+  private currentVolume: number = 0.7;
+  private fadeInterval: number | null = null;
+  private crossfadeTimeoutId: number | null = null;
+  private retryCount: number = 0;
+  private maxRetries: number = 3;
+  private readonly retryDelay: number = 1000;
+  private currentHandlers: AudioHandlers | null = null;
+
+  constructor() {
+    this.audioManager = new AudioEventManager();
+    this.handleVisibilityChange = this.handleVisibilityChange.bind(this);
+    document.addEventListener('visibilitychange', this.handleVisibilityChange);
+  }
+
+  private handleVisibilityChange() {
+    if (document.hidden) {
+      void this.audioManager.suspend();
+    } else {
+      void this.audioManager.resume();
+    }
+  }
+
+  async attachAudio(audio: HTMLAudioElement) {
+    try {
+      await this.audioManager.attach(audio);
+    } catch (error) {
+      console.error('Failed to attach audio:', error);
+      if (this.retryCount < this.maxRetries) {
+        this.retryCount++;
+        setTimeout(() => this.attachAudio(audio), this.retryDelay);
+      } else {
+        this.retryCount = 0;
+        throw new Error('Failed to attach audio after multiple attempts');
+      }
+    }
+  }
+
+  setupEventHandlers(handlers: AudioHandlers) {
+    this.currentHandlers = handlers;
+
+    try {
+      this.audioManager.addEventHandler('timeupdate', handlers.onTimeUpdate);
+      this.audioManager.addEventHandler('durationchange', handlers.onDurationChange);
+      this.audioManager.addEventHandler('ended', handlers.onEnded);
+      this.audioManager.addEventHandler('error', handlers.onError);
+      this.audioManager.addEventHandler('canplay', handlers.onCanPlay);
+      this.audioManager.addEventHandler('loadstart', handlers.onLoadStart);
+      
+      // Add optional handlers
+      if (handlers.onStalled) {
+        this.audioManager.addEventHandler('stalled', handlers.onStalled);
+      }
+      if (handlers.onSuspend) {
+        this.audioManager.addEventHandler('suspend', handlers.onSuspend);
+      }
+      if (handlers.onWaiting) {
+        this.audioManager.addEventHandler('waiting', handlers.onWaiting);
+      }
+    } catch (error) {
+      console.error('Failed to setup event handlers:', error);
+      throw error;
+    }
+  }
+
+  private clearTimers() {
+    if (this.fadeInterval !== null) {
+      window.clearInterval(this.fadeInterval);
+      this.fadeInterval = null;
+    }
+    if (this.crossfadeTimeoutId !== null) {
+      window.clearTimeout(this.crossfadeTimeoutId);
+      this.crossfadeTimeoutId = null;
+    }
+  }
+
+  startCrossfade(targetVolume: number, duration: number) {
+    this.clearTimers();
+    
+    const steps = 60; // 60 steps per second for smooth transition
+    const stepDuration = (duration * 1000) / steps;
+    const volumeDiff = this.currentVolume - targetVolume;
+    const volumeStep = volumeDiff / steps;
+    
+    let currentStep = 0;
+    
+    this.fadeInterval = window.setInterval(() => {
+      currentStep++;
+      const newVolume = this.currentVolume - (volumeStep * currentStep);
+      this.audioManager.setVolume(Math.max(0, Math.min(1, newVolume)));
+
+      if (currentStep >= steps) {
+        this.clearTimers();
+        this.currentVolume = targetVolume;
+        this.audioManager.setVolume(targetVolume);
+      }
+    }, stepDuration);
+  }
+
+  setVolume(volume: number) {
+    this.currentVolume = Math.max(0, Math.min(1, volume));
+    this.audioManager.setVolume(this.currentVolume);
+  }
+
+  setEqualizer(settings: { bass: number; mid: number; treble: number; enabled: boolean }) {
+    this.audioManager.setEqualizer(settings);
+  }
+
+  cleanup() {
+    this.clearTimers();
+    document.removeEventListener('visibilitychange', this.handleVisibilityChange);
+    this.audioManager.cleanup();
+  }
+
+  startCrossfade(targetVolume: number, duration: number) {
+    this.clearTimers();
+    
+    const steps = 60; // 60 steps per second for smooth transition
+    const stepDuration = (duration * 1000) / steps;
+    const volumeDiff = this.currentVolume - targetVolume;
+    const volumeStep = volumeDiff / steps;
+    
+    let currentStep = 0;
+    
+    this.fadeInterval = window.setInterval(() => {
+      currentStep++;
+      const newVolume = this.currentVolume - (volumeStep * currentStep);
+      this.audioManager.setVolume(Math.max(0, Math.min(1, newVolume)));
+
+      if (currentStep >= steps) {
+        this.clearTimers();
+        this.currentVolume = targetVolume;
+        this.audioManager.setVolume(targetVolume);
+      }
+    }, stepDuration);
+  }
+
+  setVolume(volume: number) {
+    this.currentVolume = Math.max(0, Math.min(1, volume));
+    this.audioManager.setVolume(this.currentVolume);
+  }
+
+  setEqualizer(settings: { bass: number; mid: number; treble: number; enabled: boolean }) {
+    this.audioManager.setEqualizer(settings);
+  }
+
+  cleanup() {
+    this.clearTimers();
+    document.removeEventListener('visibilitychange', this.handleVisibilityChange);
+    this.audioManager.cleanup();
+  }
+    }
+
+    const steps = 20; // Number of volume steps for smooth fade
+    const stepDuration = (duration * 1000) / steps;
+    const volumeStep = this.currentVolume / steps;
+    let currentStep = 0;
+
+    this.fadeInterval = window.setInterval(() => {
+      currentStep++;
+      const newVolume = this.currentVolume - (volumeStep * currentStep);
+      this.setVolume(Math.max(0, newVolume));
+
+      if (currentStep >= steps) {
+        if (this.fadeInterval) {
+          clearInterval(this.fadeInterval);
+          this.fadeInterval = null;
+        }
+      }
+    }, stepDuration);
+
+    // Start next song after half the crossfade duration
+    this.crossfadeTimeoutId = window.setTimeout(() => {
+      // Logic to start next song
+      this.crossfadeTimeoutId = null;
+    }, duration * 500);
+  }
+
+  setVolume(volume: number) {
+    this.currentVolume = volume;
+    // Additional volume management logic
+  }
+
+  setEqualizer(settings: { bass: number; mid: number; treble: number; enabled: boolean }) {
+    this.audioManager.setEqualizer(settings);
+  }
+
+  cleanup() {
+    if (this.fadeInterval) {
+      clearInterval(this.fadeInterval);
+      this.fadeInterval = null;
+    }
+    if (this.crossfadeTimeoutId) {
+      clearTimeout(this.crossfadeTimeoutId);
+      this.crossfadeTimeoutId = null;
+    }
+    this.audioManager.cleanup();
+  }
+}

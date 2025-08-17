@@ -1,59 +1,57 @@
 import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
 import { AuthState, User } from '../types';
-import { offlineAuth, MASTER_ADMIN } from '../utils/offlineAuth';
+import { AuthService } from '../services/auth';
+import type { Session, User as SupabaseUser } from '@supabase/supabase-js';
 
 interface AuthContextType extends AuthState {
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, username: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   loading: boolean;
-  isOnline: boolean;
-  syncStatus: string;
-  forceSync: () => Promise<void>;
+  supabaseUser: SupabaseUser | null;
+  session: Session | null;
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+export const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 type AuthAction = 
   | { type: 'SET_LOADING'; payload: boolean }
-  | { type: 'LOGIN_SUCCESS'; payload: { user: User; token: string } }
-  | { type: 'LOGOUT' }
-  | { type: 'SET_ONLINE_STATUS'; payload: boolean }
-  | { type: 'SET_SYNC_STATUS'; payload: string };
+  | { type: 'SET_AUTH_STATE'; payload: { user: User | null; supabaseUser: SupabaseUser | null; session: Session | null } }
+  | { type: 'LOGOUT' };
 
-const initialState: AuthState & { loading: boolean; isOnline: boolean; syncStatus: string } = {
+const initialState: AuthState & { loading: boolean; supabaseUser: SupabaseUser | null; session: Session | null } = {
   user: null,
   token: null,
   isAuthenticated: false,
   loading: false,
-  isOnline: navigator.onLine,
-  syncStatus: 'unknown'
+  supabaseUser: null,
+  session: null
 };
 
 const authReducer = (state: typeof initialState, action: AuthAction): typeof initialState => {
   switch (action.type) {
     case 'SET_LOADING':
       return { ...state, loading: action.payload };
-    case 'LOGIN_SUCCESS':
+    case 'SET_AUTH_STATE':
       return {
         ...state,
         user: action.payload.user,
-        token: action.payload.token,
-        isAuthenticated: true,
+        supabaseUser: action.payload.supabaseUser,
+        session: action.payload.session,
+        token: action.payload.session?.access_token || null,
+        isAuthenticated: !!action.payload.session?.user,
         loading: false
       };
     case 'LOGOUT':
       return {
         ...state,
         user: null,
+        supabaseUser: null,
+        session: null,
         token: null,
         isAuthenticated: false,
         loading: false
       };
-    case 'SET_ONLINE_STATUS':
-      return { ...state, isOnline: action.payload };
-    case 'SET_SYNC_STATUS':
-      return { ...state, syncStatus: action.payload };
     default:
       return state;
   }
@@ -63,48 +61,69 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [state, dispatch] = useReducer(authReducer, initialState);
 
   useEffect(() => {
-    // Restore session from offline storage
-    const session = offlineAuth.getCurrentSession();
-    if (session) {
-      dispatch({ type: 'LOGIN_SUCCESS', payload: session });
-    }
+    // Set up auth state listener
+    const { data: { subscription } } = AuthService.onAuthStateChange(async (event, session) => {
+      console.log('Auth state changed:', event, session);
+      
+      if (session?.user) {
+        // Fetch user profile from our database
+        const userProfile = await AuthService.getUserProfile(session.user.id);
+        dispatch({
+          type: 'SET_AUTH_STATE',
+          payload: {
+            user: userProfile,
+            supabaseUser: session.user,
+            session
+          }
+        });
+      } else {
+        dispatch({ type: 'LOGOUT' });
+      }
+    });
 
-    // Set up online/offline listeners
-    const handleOnline = () => {
-      dispatch({ type: 'SET_ONLINE_STATUS', payload: true });
-      offlineAuth.attemptSync().then(() => {
-        updateSyncStatus();
-      });
+    // Initial session check
+    const checkInitialSession = async () => {
+      try {
+        const session = await AuthService.getSession();
+        if (session?.user) {
+          const userProfile = await AuthService.getUserProfile(session.user.id);
+          dispatch({
+            type: 'SET_AUTH_STATE',
+            payload: {
+              user: userProfile,
+              supabaseUser: session.user,
+              session
+            }
+          });
+        }
+      } catch (error) {
+        console.error('Error checking initial session:', error);
+      }
     };
 
-    const handleOffline = () => {
-      dispatch({ type: 'SET_ONLINE_STATUS', payload: false });
-    };
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    // Initial sync status
-    updateSyncStatus();
+    checkInitialSession();
 
     return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
+      subscription.unsubscribe();
     };
   }, []);
-
-  const updateSyncStatus = () => {
-    const status = offlineAuth.getSyncStatus();
-    dispatch({ type: 'SET_SYNC_STATUS', payload: status?.status || 'unknown' });
-  };
 
   const login = async (email: string, password: string): Promise<void> => {
     dispatch({ type: 'SET_LOADING', payload: true });
     
     try {
-      const result = await offlineAuth.login(email, password);
-      dispatch({ type: 'LOGIN_SUCCESS', payload: result });
-      updateSyncStatus();
+      const { session, user: supabaseUser } = await AuthService.signIn(email, password);
+      if (session?.user) {
+        const userProfile = await AuthService.getUserProfile(session.user.id);
+        dispatch({
+          type: 'SET_AUTH_STATE',
+          payload: {
+            user: userProfile,
+            supabaseUser: session.user,
+            session
+          }
+        });
+      }
     } catch (error) {
       dispatch({ type: 'SET_LOADING', payload: false });
       throw error;
@@ -115,24 +134,32 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     dispatch({ type: 'SET_LOADING', payload: true });
     
     try {
-      const result = await offlineAuth.register(email, password, username);
-      dispatch({ type: 'LOGIN_SUCCESS', payload: result });
-      updateSyncStatus();
+      const { session, user: supabaseUser } = await AuthService.signUp(email, password, username);
+      if (session?.user) {
+        const userProfile = await AuthService.getUserProfile(session.user.id);
+        dispatch({
+          type: 'SET_AUTH_STATE',
+          payload: {
+            user: userProfile,
+            supabaseUser: session.user,
+            session
+          }
+        });
+      }
     } catch (error) {
       dispatch({ type: 'SET_LOADING', payload: false });
       throw error;
     }
   };
 
-  const logout = (): void => {
-    offlineAuth.logout();
-    dispatch({ type: 'LOGOUT' });
-  };
-
-  const forceSync = async (): Promise<void> => {
-    if (state.isOnline) {
-      await offlineAuth.attemptSync();
-      updateSyncStatus();
+  const logout = async (): Promise<void> => {
+    try {
+      await AuthService.signOut();
+      dispatch({ type: 'LOGOUT' });
+    } catch (error) {
+      console.error('Error during logout:', error);
+      // Force logout even if there's an error
+      dispatch({ type: 'LOGOUT' });
     }
   };
 
@@ -141,8 +168,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       ...state,
       login,
       register,
-      logout,
-      forceSync
+      logout
     }}>
       {children}
     </AuthContext.Provider>

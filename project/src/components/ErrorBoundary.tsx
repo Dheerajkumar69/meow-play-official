@@ -1,9 +1,12 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { errorService } from '../services/ErrorService';
 
 interface Props {
   children: ReactNode;
   fallback?: ReactNode;
+  onRetry?: () => void;
+  context?: string;
 }
 
 interface State {
@@ -24,11 +27,21 @@ class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     this.setState({ error, errorInfo });
-    console.error('Error caught by boundary:', error, errorInfo);
+    
+    // Log the error using ErrorService
+    errorService.logUIError(error, this.props.context || 'ErrorBoundary').catch(logError => {
+      console.error('Failed to log error to ErrorService:', logError);
+    });
   }
 
   handleRetry = () => {
+    // Clear error state
     this.setState({ hasError: false, error: undefined, errorInfo: undefined });
+    
+    // Call custom retry handler if provided
+    if (this.props.onRetry) {
+      this.props.onRetry();
+    }
   };
 
   render() {

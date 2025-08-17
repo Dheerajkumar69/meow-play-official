@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
   Home, 
@@ -16,16 +16,43 @@ import {
   Menu,
   X,
   Globe,
-  Cloud
+  Loader
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { mockPlaylists } from '../utils/mockData';
+import { ApiService } from '../services/api';
+import { Playlist } from '../types';
+import { SanitizationService } from '../utils/sanitization';
 
 const Sidebar: React.FC = () => {
   const location = useLocation();
   const { user, logout } = useAuth();
   const [showCreatePlaylist, setShowCreatePlaylist] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [isLoadingPlaylists, setIsLoadingPlaylists] = useState(false);
+  const [playlistName, setPlaylistName] = useState('');
+  const [isCreatingPlaylist, setIsCreatingPlaylist] = useState(false);
+  
+  // Fetch user playlists
+  useEffect(() => {
+    const fetchPlaylists = async () => {
+      if (user) {
+        setIsLoadingPlaylists(true);
+        try {
+          // TODO: Replace with actual API call to get user playlists
+          // For now, we'll use the mock data
+          setPlaylists(mockPlaylists);
+        } catch (error) {
+          console.error('Error fetching playlists:', error);
+        } finally {
+          setIsLoadingPlaylists(false);
+        }
+      }
+    };
+    
+    fetchPlaylists();
+  }, [user]);
 
   const navigation = [
     { name: 'Home', href: '/', icon: Home },
@@ -35,7 +62,6 @@ const Sidebar: React.FC = () => {
     { name: 'Liked Songs', href: '/liked', icon: Heart },
     { name: 'Recently Played', href: '/recent', icon: Clock },
     { name: 'Upload', href: '/upload', icon: Upload },
-    { name: 'Server Songs', href: '/server-songs', icon: Cloud },
   ];
 
   // Add admin panel for admin users
@@ -45,16 +71,35 @@ const Sidebar: React.FC = () => {
 
   const isActive = (path: string) => location.pathname === path;
 
-  const handleCreatePlaylist = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleCreatePlaylist = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
-      const target = e.target as HTMLInputElement;
-      if (target.value.trim()) {
-        // TODO: Implement playlist creation
-        console.log('Creating playlist:', target.value);
-        target.value = '';
-        setShowCreatePlaylist(false);
+      if (playlistName.trim() && user) {
+        setIsCreatingPlaylist(true);
+        try {
+          const api = ApiService.getInstance();
+          const sanitizedName = SanitizationService.sanitizeName(playlistName.trim());
+          const newPlaylist = await api.createPlaylist({
+            name: sanitizedName,
+            userId: user.id,
+            isPublic: false,
+            description: ''
+          });
+          
+          // Add the new playlist to the list
+          setPlaylists(prev => [newPlaylist, ...prev]);
+          setPlaylistName('');
+          setShowCreatePlaylist(false);
+        } catch (error) {
+          console.error('Error creating playlist:', error);
+        } finally {
+          setIsCreatingPlaylist(false);
+        }
       }
     }
+  };
+  
+  const handlePlaylistNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setPlaylistName(e.target.value);
   };
 
   const SidebarContent = () => (
@@ -65,7 +110,7 @@ const Sidebar: React.FC = () => {
           <div className="w-8 h-8 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
             <span className="text-white text-lg">🐱</span>
           </div>
-          <h1 className="text-xl font-bold text-white">Meow-Play</h1>
+          <h1 className="text-lg xxs:text-xl font-bold text-white">Meow-Play</h1>
         </div>
       </div>
 
@@ -84,7 +129,7 @@ const Sidebar: React.FC = () => {
               }`}
             >
               <item.icon className="w-5 h-5" />
-              <span className="font-medium">{item.name}</span>
+              <span className="text-sm xxs:text-base font-medium">{item.name}</span>
               {item.name === 'Admin Panel' && (
                 <Shield className="w-4 h-4 text-purple-400" />
               )}
@@ -94,7 +139,7 @@ const Sidebar: React.FC = () => {
 
         {/* Discover Section */}
         <div className="mt-8">
-          <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wider px-4 py-2">
+          <h3 className="text-xs xxs:text-sm font-semibold text-gray-300 uppercase tracking-wider px-4 py-2">
             Discover
           </h3>
           <div className="space-y-1">
@@ -108,7 +153,7 @@ const Sidebar: React.FC = () => {
               }`}
             >
               <TrendingUp className="w-4 h-4" />
-              <span className="text-sm">Trending</span>
+              <span className="text-xs xxs:text-sm">Trending</span>
             </Link>
             <Link
               to="/library"
@@ -120,7 +165,7 @@ const Sidebar: React.FC = () => {
               }`}
             >
               <span className="text-lg">✨</span>
-              <span className="text-sm">For You</span>
+              <span className="text-xs xxs:text-sm">For You</span>
             </Link>
           </div>
         </div>
@@ -128,7 +173,7 @@ const Sidebar: React.FC = () => {
         {/* Playlists */}
         <div className="mt-8">
           <div className="flex items-center justify-between px-4 py-2">
-            <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">
+            <h3 className="text-xs xxs:text-sm font-semibold text-gray-300 uppercase tracking-wider">
               Playlists
             </h3>
             <button
@@ -145,31 +190,49 @@ const Sidebar: React.FC = () => {
               <input
                 type="text"
                 placeholder="Playlist name"
+                value={playlistName}
+                onChange={handlePlaylistNameChange}
                 onKeyPress={handleCreatePlaylist}
-                onBlur={() => setShowCreatePlaylist(false)}
+                onBlur={() => !isCreatingPlaylist && setShowCreatePlaylist(false)}
                 autoFocus
-                className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-purple-500"
+                disabled={isCreatingPlaylist}
+                className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-purple-500 disabled:opacity-50"
               />
+              {isCreatingPlaylist && (
+                <div className="flex justify-center mt-2">
+                  <Loader className="w-4 h-4 text-purple-400 animate-spin" />
+                </div>
+              )}
             </div>
           )}
 
           <div className="space-y-1 mt-2">
-            {mockPlaylists.map((playlist) => (
-              <Link
-                key={playlist.id}
-                to={`/playlist/${playlist.id}`}
-                onClick={() => setIsMobileMenuOpen(false)}
-                className="flex items-center space-x-3 px-4 py-2 text-gray-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
-              >
-                <ListMusic className="w-4 h-4" />
-                <div className="min-w-0 flex-1">
-                  <span className="text-sm truncate block">{playlist.name}</span>
-                  {playlist.followers && (
-                    <span className="text-xs text-gray-500">{playlist.followers} followers</span>
-                  )}
-                </div>
-              </Link>
-            ))}
+            {isLoadingPlaylists ? (
+              <div className="flex justify-center py-4">
+                <Loader className="w-5 h-5 text-purple-400 animate-spin" />
+              </div>
+            ) : playlists.length > 0 ? (
+              playlists.map((playlist) => (
+                <Link
+                  key={playlist.id}
+                  to={`/playlist/${playlist.id}`}
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className="flex items-center space-x-3 px-4 py-2 text-gray-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
+                >
+                  <ListMusic className="w-4 h-4" />
+                  <div className="min-w-0 flex-1">
+                    <span className="text-xs xxs:text-sm truncate block">{playlist.name}</span>
+                    {playlist.followers && (
+                      <span className="text-[10px] xxs:text-xs text-gray-500">{playlist.followers} followers</span>
+                    )}
+                  </div>
+                </Link>
+              ))
+            ) : (
+              <div className="px-4 py-2 text-gray-400 text-xs xxs:text-sm">
+                No playlists yet. Create one!
+              </div>
+            )}
             
             {/* Weekend Special Playlist */}
             <Link
@@ -179,8 +242,8 @@ const Sidebar: React.FC = () => {
             >
               <span className="text-lg">🐱</span>
               <div className="min-w-0 flex-1">
-                <span className="text-sm truncate block">Weekend Special</span>
-                <span className="text-xs text-purple-400">Auto-updated weekly</span>
+                <span className="text-xs xxs:text-sm truncate block">Weekend Special</span>
+                <span className="text-[10px] xxs:text-xs text-purple-400">Auto-updated weekly</span>
               </div>
             </Link>
           </div>
@@ -203,11 +266,11 @@ const Sidebar: React.FC = () => {
               )}
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-medium text-white truncate">
+              <p className="text-xs xxs:text-sm font-medium text-white truncate">
                 {user?.username}
                 {user?.isAdmin && <span className="text-purple-400 ml-1">(Admin)</span>}
               </p>
-              <p className="text-xs text-gray-400 truncate">{user?.email}</p>
+              <p className="text-[10px] xxs:text-xs text-gray-400 truncate">{user?.email}</p>
             </div>
           </Link>
           <button
@@ -224,10 +287,10 @@ const Sidebar: React.FC = () => {
 
   return (
     <>
-      {/* Mobile Menu Button */}
+      {/* Mobile Menu Button - Fixed to top left */}
       <button
         onClick={() => setIsMobileMenuOpen(true)}
-        className="lg:hidden fixed top-4 left-4 z-50 p-2 bg-black/50 backdrop-blur-sm rounded-lg text-white"
+        className="lg:hidden fixed top-4 left-4 z-40 text-white bg-black/50 backdrop-blur-sm p-3 rounded-full hover:bg-black/70 active:bg-black/90 transition-colors touch-manipulation"
         aria-label="Open menu"
       >
         <Menu className="w-6 h-6" />
@@ -242,30 +305,31 @@ const Sidebar: React.FC = () => {
       )}
 
       {/* Desktop Sidebar */}
-      <div className="hidden lg:flex w-64 bg-black/50 backdrop-blur-lg flex-col">
+      <div className="hidden lg:flex flex-col w-64 bg-black/30 backdrop-blur-lg border-r border-white/10 overflow-y-auto">
         <SidebarContent />
       </div>
 
       {/* Mobile Sidebar */}
-      <div className={`lg:hidden fixed inset-y-0 left-0 z-50 w-64 bg-black/90 backdrop-blur-lg flex flex-col transform transition-transform duration-300 ${
-        isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
-      }`}>
-        <div className="flex items-center justify-between p-4 border-b border-white/10">
-          <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
-              <Music className="w-4 h-4 text-white" />
-            </div>
-            <h1 className="text-xl font-bold text-white">Streamify</h1>
-          </div>
-          <button
+      <div className={`fixed inset-0 z-50 lg:hidden ${isMobileMenuOpen ? 'block' : 'hidden'}`}>
+        {/* Backdrop */}
+        <div 
+          className="absolute inset-0 bg-black/60 backdrop-blur-sm" 
+          onClick={() => setIsMobileMenuOpen(false)}
+          role="button"
+          tabIndex={0}
+          aria-label="Close mobile menu"
+        />
+        
+        {/* Sidebar */}
+        <div className="absolute top-0 left-0 h-full w-64 xxs:w-72 sm:w-80 bg-black/80 backdrop-blur-lg border-r border-white/10 transform transition-transform duration-300 overflow-y-auto">
+          <button 
             onClick={() => setIsMobileMenuOpen(false)}
-            className="p-2 text-gray-400 hover:text-white transition-colors"
+            className="absolute top-4 right-4 text-gray-400 hover:text-white p-2 touch-manipulation"
             aria-label="Close menu"
           >
             <X className="w-5 h-5" />
           </button>
-        </div>
-        <div className="flex-1 overflow-hidden">
+          
           <SidebarContent />
         </div>
       </div>
